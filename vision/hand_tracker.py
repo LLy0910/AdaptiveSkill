@@ -44,7 +44,7 @@ options = HandLandmarkerOptions(
     # 摄像头视频流
     running_mode=VisionRunningMode.VIDEO,
 
-    # Day 1 只追踪一只手
+    # 只追踪一只手
     num_hands=1,
 
     min_hand_detection_confidence=0.5,
@@ -231,7 +231,7 @@ with HandLandmarker.create_from_options(options) as landmarker:
 
 
             # =================================================
-            # 7. 获取 Day 1 需要的三个点
+            # 7. 获取所需的三个点
             # =================================================
 
             # 0 = wrist

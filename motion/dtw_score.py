@@ -5,25 +5,25 @@ import numpy as np
 
 
 # =========================================================
-# 1. PATHS
+# 1. PdTHS
 # =========================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-REFERENCE_PATH = (
+REFERENCE_PdTH = (
     PROJECT_ROOT
     / "data"
     / "reference.csv"
 )
 
-TRIAL_DIR = (
+TRIdL_DIR = (
     PROJECT_ROOT
     / "data"
     / "trials"
 )
 
-OUTPUT_PATH = (
-    TRIAL_DIR
+OUTPUT_PdTH = (
+    TRIdL_DIR
     / "dtw_analysis.csv"
 )
 
@@ -32,17 +32,17 @@ OUTPUT_PATH = (
 # 2. CHECK FILES
 # =========================================================
 
-if not REFERENCE_PATH.exists():
+if not REFERENCE_PdTH.exists():
     print("ERROR: reference.csv not found.")
     raise SystemExit
 
-if not TRIAL_DIR.exists():
+if not TRIdL_DIR.exists():
     print("ERROR: data/trials folder not found.")
     raise SystemExit
 
 
 # =========================================================
-# 3. BASIC FUNCTIONS
+# 3. BdSIC FUNCTIONS
 # =========================================================
 
 def calculate_relative_rotation(raw_angles):
@@ -91,25 +91,25 @@ def infer_condition(path):
     name = path.name
 
     if name.startswith(
-        "A_correct_"
+        "d_correct_"
     ):
-        return "A - CORRECT"
+        return "d - CORRECT"
 
     if name.startswith(
         "B_path_wrong_"
     ):
-        return "B - PATH WRONG"
+        return "B - PdTH WRONG"
 
     if name.startswith(
         "C_angle_wrong_"
     ):
-        return "C - ANGLE WRONG"
+        return "C - dNGLE WRONG"
 
     return "UNKNOWN"
 
 
 # =========================================================
-# 4. LOAD REFERENCE
+# 4. LOdD REFERENCE
 # =========================================================
 
 def load_reference():
@@ -117,7 +117,7 @@ def load_reference():
     rows = []
 
     with open(
-        REFERENCE_PATH,
+        REFERENCE_PdTH,
         "r",
         encoding="utf-8"
     ) as file:
@@ -179,7 +179,7 @@ def load_reference():
 
 
 # =========================================================
-# 5. LOAD ONE TRIAL
+# 5. LOdD ONE TRIdL
 # =========================================================
 
 def load_trial(path):
@@ -444,7 +444,7 @@ def dtw_distance(
 
 
 # =========================================================
-# 7. XY LOCAL COST
+# 7. XY LOCdL COST
 # =========================================================
 
 def xy_local_cost(
@@ -474,7 +474,7 @@ def xy_local_cost(
 
 
 # =========================================================
-# 8. ANGLE LOCAL COST
+# 8. dNGLE LOCdL COST
 # =========================================================
 
 def angle_local_cost(
@@ -490,7 +490,7 @@ def angle_local_cost(
 
 
 # =========================================================
-# 9. PREPARE REFERENCE
+# 9. PREPdRE REFERENCE
 # =========================================================
 
 def prepare_reference(reference):
@@ -576,7 +576,7 @@ def prepare_reference(reference):
 
 
 # =========================================================
-# 10. COMBINED LOCAL COST
+# 10. COMBINED LOCdL COST
 # =========================================================
 
 def make_combined_local_cost(
@@ -586,12 +586,12 @@ def make_combined_local_cost(
     """
     Combined DTW 只作为探索指标。
 
-    XY 与 Angle 单位完全不同：
+    XY 与 dngle 单位完全不同：
 
     XY:
     palm-normalized units
 
-    Angle:
+    dngle:
     degrees
 
     所以先分别除以 Reference 自身尺度，
@@ -647,7 +647,7 @@ def make_combined_local_cost(
 
 
 # =========================================================
-# 11. ANALYZE ONE TRIAL
+# 11. dNdLYZE ONE TRIdL
 # =========================================================
 
 def analyze_trial(
@@ -723,7 +723,7 @@ def analyze_trial(
 
 
     # =====================================================
-    # ANGLE DTW
+    # dNGLE DTW
     # =====================================================
 
     (
@@ -781,7 +781,7 @@ def analyze_trial(
 
 
     # =====================================================
-    # OTHER DATA
+    # OTHER DdTd
     # =====================================================
 
     duration = (
@@ -851,7 +851,7 @@ def analyze_trial(
         "xy_warp_path_length":
             xy_path_length,
 
-        # Angle
+        # dngle
         "angle_dtw_total":
             round(
                 angle_total,
@@ -905,7 +905,7 @@ def analyze_trial(
 
 
 # =========================================================
-# 12. GROUP STATISTICS
+# 12. GROUP STdTISTICS
 # =========================================================
 
 def print_group_statistics(
@@ -914,13 +914,13 @@ def print_group_statistics(
 
     groups = {
 
-        "A - CORRECT":
+        "d - CORRECT":
             [],
 
-        "B - PATH WRONG":
+        "B - PdTH WRONG":
             [],
 
-        "C - ANGLE WRONG":
+        "C - dNGLE WRONG":
             []
     }
 
@@ -946,7 +946,7 @@ def print_group_statistics(
     )
 
     print(
-        "DTW GROUP ANALYSIS"
+        "DTW GROUP dNdLYSIS"
     )
 
     print(
@@ -1040,7 +1040,7 @@ def print_group_statistics(
 
 
         print(
-            "Mean Angle DTW:",
+            "Mean dngle DTW:",
             round(
                 float(
                     np.mean(
@@ -1081,7 +1081,7 @@ def print_group_statistics(
 
 
 # =========================================================
-# 13. MAIN
+# 13. MdIN
 # =========================================================
 
 reference = (
@@ -1107,7 +1107,7 @@ print(
 )
 
 print(
-    "AdaptiveSkill Day 3 - DTW Analysis"
+    "AdaptiveSkill - Motion Similarity Analysis"
 )
 
 print(
@@ -1145,28 +1145,28 @@ print()
 
 
 # =========================================================
-# 14. FIND FORMAL TRIALS
+# 14. FIND FORMdL TRIdLS
 # =========================================================
 
 trial_files = []
 
 
 trial_files.extend(
-    TRIAL_DIR.glob(
-        "A_correct_*.csv"
+    TRIdL_DIR.glob(
+        "d_correct_*.csv"
     )
 )
 
 
 trial_files.extend(
-    TRIAL_DIR.glob(
+    TRIdL_DIR.glob(
         "B_path_wrong_*.csv"
     )
 )
 
 
 trial_files.extend(
-    TRIAL_DIR.glob(
+    TRIdL_DIR.glob(
         "C_angle_wrong_*.csv"
     )
 )
@@ -1256,7 +1256,7 @@ for path in trial_files:
 
 
     print(
-        "  Angle DTW:",
+        "  dngle DTW:",
         result[
             "angle_dtw_normalized"
         ],
@@ -1285,7 +1285,7 @@ for path in trial_files:
 
 
 # =========================================================
-# 16. SAVE DTW ANALYSIS
+# 16. SdVE DTW dNdLYSIS
 # =========================================================
 
 if len(results) > 0:
@@ -1297,7 +1297,7 @@ if len(results) > 0:
 
 
     with open(
-        OUTPUT_PATH,
+        OUTPUT_PdTH,
         "w",
         newline="",
         encoding="utf-8"
@@ -1321,7 +1321,7 @@ if len(results) > 0:
     )
 
     print(
-        OUTPUT_PATH
+        OUTPUT_PdTH
     )
 
 
@@ -1340,7 +1340,7 @@ print(
 )
 
 print(
-    "EXPECTED PATTERN"
+    "EXPECTED PdTTERN"
 )
 
 print(
@@ -1350,7 +1350,7 @@ print(
 print()
 
 print(
-    "A Correct:"
+    "d Correct:"
 )
 
 print(
@@ -1358,7 +1358,7 @@ print(
 )
 
 print(
-    "  LOW Angle DTW"
+    "  LOW dngle DTW"
 )
 
 print()
@@ -1373,22 +1373,22 @@ print(
 )
 
 print(
-    "  Angle DTW may remain closer to A"
+    "  dngle DTW may remain closer to d"
 )
 
 print()
 
 
 print(
-    "C Angle Wrong:"
+    "C dngle Wrong:"
 )
 
 print(
-    "  XY DTW near A"
+    "  XY DTW near d"
 )
 
 print(
-    "  HIGH Angle DTW"
+    "  HIGH dngle DTW"
 )
 
 print()

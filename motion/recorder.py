@@ -467,7 +467,7 @@ def draw_reference(frame, reference):
     """
     屏幕上继续显示 raw trajectory。
 
-    normalized trajectory 后续 Day 3
+    normalized trajectory 用于后续 motion evaluation
     用来做真正的比较。
     """
 

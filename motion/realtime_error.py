@@ -9,6 +9,8 @@ from datetime import datetime
 
 import numpy as np
 
+from hesitation_detector import HesitationDetector
+
 
 # =========================================================
 # 1. PROJECT PATHS
@@ -1527,7 +1529,12 @@ def save_trial(
         "speed",
 
         "nearest_reference_index",
-        "reference_progress"
+        "reference_progress",
+
+        "hesitation_state",
+        "hesitation_event",
+        "hesitation_duration",
+        "hesitation_progress_delta"
     ]
 
 
@@ -2059,6 +2066,12 @@ reference_bounds = (
 )
 
 
+# Hesitation detector
+hesitation_detector = HesitationDetector()
+
+current_hesitation_result = None
+
+
 # Calibration
 calibrating = False
 
@@ -2129,6 +2142,8 @@ current_angle_error = None
 
 current_nearest_index = None
 
+current_reference_progress = None
+
 
 print()
 print(
@@ -2136,7 +2151,7 @@ print(
 )
 
 print(
-    "AdaptiveSkill Day 3"
+    "AdaptiveSkill - Motion Evaluation"
 )
 
 print(
@@ -2181,6 +2196,18 @@ print(
 
 print(
     "Q = Quit"
+)
+
+print()
+
+print(
+    "Hesitation detector:"
+)
+
+print(
+    f"speed < {hesitation_detector.speed_threshold:.4f} | "
+    f"hold >= {hesitation_detector.hold_duration:.3f}s | "
+    f"progress delta <= {hesitation_detector.max_progress_delta:.3f}"
 )
 
 print(
@@ -2299,6 +2326,8 @@ with HandLandmarker.create_from_options(
 
 
         start_position_error = None
+
+        current_reference_progress = None
 
 
         # =================================================
@@ -2590,6 +2619,21 @@ with HandLandmarker.create_from_options(
                     )
 
 
+                    current_reference_progress = (
+
+                        current_nearest_index
+
+                        /
+
+                        max(
+                            len(reference)
+                            -
+                            1,
+                            1
+                        )
+                    )
+
+
                     # ANGLE ERROR
                     reference_angle = (
 
@@ -2689,6 +2733,62 @@ with HandLandmarker.create_from_options(
                     )
 
 
+                    # HESITATION
+                    hesitation_timestamp = (
+
+                        time.perf_counter()
+
+                        -
+
+                        trial_start_time
+                    )
+
+
+                    current_hesitation_result = (
+                        hesitation_detector.update(
+
+                            timestamp=
+                                hesitation_timestamp,
+
+                            speed=
+                                current_speed,
+
+                            progress=
+                                current_reference_progress,
+
+                            tracking=True
+                        )
+                    )
+
+
+                    if current_hesitation_result[
+                        "event"
+                    ]:
+
+                        print()
+
+                        print(
+                            "HESITATION DETECTED"
+                        )
+
+                        print(
+                            f"Time: "
+                            f"{hesitation_timestamp:.2f}s"
+                        )
+
+                        print(
+                            f"Progress: "
+                            f"{current_reference_progress:.3f}"
+                        )
+
+                        print(
+                            f"Low-speed hold: "
+                            f"{current_hesitation_result['candidate_duration']:.3f}s"
+                        )
+
+                        print()
+
+
                     learner_trail.append(
                         (
                             current_x_norm,
@@ -2736,6 +2836,33 @@ with HandLandmarker.create_from_options(
         # =================================================
 
         else:
+
+
+            if practicing:
+
+                hesitation_timestamp = (
+
+                    time.perf_counter()
+
+                    -
+
+                    trial_start_time
+                )
+
+
+                current_hesitation_result = (
+                    hesitation_detector.update(
+
+                        timestamp=
+                            hesitation_timestamp,
+
+                        speed=0.0,
+
+                        progress=0.0,
+
+                        tracking=False
+                    )
+                )
 
 
             put_text(
@@ -2798,17 +2925,38 @@ with HandLandmarker.create_from_options(
 
 
                 reference_progress = (
+                    current_reference_progress
+                )
 
-                    current_nearest_index
 
-                    /
+                hesitation_state = (
+                    current_hesitation_result["state"]
+                    if current_hesitation_result is not None
+                    else "NORMAL"
+                )
 
-                    max(
-                        len(reference)
-                        -
-                        1,
-                        1
+                hesitation_event = (
+                    int(
+                        current_hesitation_result["event"]
                     )
+                    if current_hesitation_result is not None
+                    else 0
+                )
+
+                hesitation_duration = (
+                    current_hesitation_result[
+                        "candidate_duration"
+                    ]
+                    if current_hesitation_result is not None
+                    else 0.0
+                )
+
+                hesitation_progress_delta = (
+                    current_hesitation_result[
+                        "progress_delta"
+                    ]
+                    if current_hesitation_result is not None
+                    else 0.0
                 )
 
 
@@ -2854,7 +3002,19 @@ with HandLandmarker.create_from_options(
                         current_nearest_index,
 
                     "reference_progress":
-                        reference_progress
+                        reference_progress,
+
+                    "hesitation_state":
+                        hesitation_state,
+
+                    "hesitation_event":
+                        hesitation_event,
+
+                    "hesitation_duration":
+                        hesitation_duration,
+
+                    "hesitation_progress_delta":
+                        hesitation_progress_delta
                 })
 
 
@@ -2887,7 +3047,20 @@ with HandLandmarker.create_from_options(
 
                     "nearest_reference_index": "",
 
-                    "reference_progress": ""
+                    "reference_progress": "",
+
+                    "hesitation_state":
+                        (
+                            current_hesitation_result["state"]
+                            if current_hesitation_result is not None
+                            else "NO_TRACKING"
+                        ),
+
+                    "hesitation_event": 0,
+
+                    "hesitation_duration": 0.0,
+
+                    "hesitation_progress_delta": 0.0
                 })
 
 
@@ -3185,6 +3358,118 @@ with HandLandmarker.create_from_options(
             )
 
 
+            if current_hesitation_result is None:
+
+                hesitation_text = (
+                    "HESITATION: NORMAL"
+                )
+
+                hesitation_color = (
+                    255,
+                    255,
+                    255
+                )
+
+
+            else:
+
+                hesitation_state = (
+                    current_hesitation_result[
+                        "state"
+                    ]
+                )
+
+
+                if hesitation_state == "HESITATION":
+
+                    hesitation_text = (
+                        "HESITATION DETECTED"
+                    )
+
+                    hesitation_color = (
+                        0,
+                        0,
+                        255
+                    )
+
+
+                elif hesitation_state == "LOW_SPEED":
+
+                    hesitation_text = (
+                        "LOW SPEED: "
+                        f"{current_hesitation_result['candidate_duration']:.2f}"
+                        "/"
+                        f"{hesitation_detector.hold_duration:.2f}s"
+                    )
+
+                    hesitation_color = (
+                        0,
+                        255,
+                        255
+                    )
+
+
+                elif hesitation_state == "NO_TRACKING":
+
+                    hesitation_text = (
+                        "HESITATION: NO TRACKING"
+                    )
+
+                    hesitation_color = (
+                        255,
+                        255,
+                        255
+                    )
+
+
+                elif hesitation_state == "IGNORED":
+
+                    hesitation_text = (
+                        "HESITATION: BOUNDARY IGNORED"
+                    )
+
+                    hesitation_color = (
+                        255,
+                        255,
+                        255
+                    )
+
+
+                else:
+
+                    hesitation_text = (
+                        "HESITATION: NORMAL"
+                    )
+
+                    hesitation_color = (
+                        255,
+                        255,
+                        255
+                    )
+
+
+            put_text(
+                frame,
+                hesitation_text,
+                (
+                    int(
+                        18
+                        *
+                        ui
+                    ),
+                    top
+                    +
+                    gap
+                    *
+                    3
+                ),
+                ui,
+                0.54,
+                2,
+                hesitation_color
+            )
+
+
         # =================================================
         # REVIEW SUMMARY
         # =================================================
@@ -3357,7 +3642,7 @@ with HandLandmarker.create_from_options(
 
         cv2.imshow(
             (
-                "AdaptiveSkill Day3 - "
+                "AdaptiveSkill - "
                 "Clean Trial Workflow"
             ),
             frame
@@ -3476,6 +3761,10 @@ with HandLandmarker.create_from_options(
 
 
                 learner_trail.clear()
+
+                hesitation_detector.reset()
+
+                current_hesitation_result = None
 
 
                 trial_finished = False
@@ -3629,6 +3918,10 @@ with HandLandmarker.create_from_options(
 
                     speed_history.clear()
 
+                    hesitation_detector.reset()
+
+                    current_hesitation_result = None
+
 
                     previous_norm_x = None
 
@@ -3645,6 +3938,8 @@ with HandLandmarker.create_from_options(
                     current_angle_error = None
 
                     current_nearest_index = None
+
+                    current_reference_progress = None
 
 
                     last_review_summary = None
@@ -3827,5 +4122,5 @@ cv2.destroyAllWindows()
 
 print()
 print(
-    "AdaptiveSkill Day 3 Closed."
+    "AdaptiveSkill - Motion Evaluation Closed."
 )
