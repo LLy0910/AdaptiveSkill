@@ -10,6 +10,8 @@ from datetime import datetime
 import numpy as np
 
 from hesitation_detector import HesitationDetector
+from online_motion_metrics import OnlineMotionMetrics
+from assistance_policy import AssistancePolicy
 
 
 # =========================================================
@@ -77,6 +79,12 @@ SPEED_SMOOTHING_WINDOW = 5
 LEARNER_TRAIL_LENGTH = 600
 
 MIN_VALID_TRIAL_FRAMES = 10
+
+# Rotation-completion diagnostics.
+# These gates only prevent unstable percentages very early in a trial.
+# They are NOT assistance thresholds.
+ROTATION_DIAGNOSTIC_MIN_PROGRESS = 0.25
+ROTATION_DIAGNOSTIC_MIN_EXPECTED_DEG = 8.0
 
 
 # =========================================================
@@ -1321,6 +1329,31 @@ def calculate_trial_summary(
     )
 
 
+    # Optional rotation diagnostics.
+    # Older trial CSVs may not contain these fields, so keep
+    # the summary backwards compatible.
+    rotation_deficits = [
+        float(row["rotation_deficit_deg"])
+        for row in valid_records
+        if row.get("rotation_deficit_deg") not in (None, "")
+    ]
+
+    rotation_completions = [
+        float(row["rotation_completion_ratio"])
+        for row in valid_records
+        if row.get("rotation_completion_ratio") not in (None, "")
+    ]
+
+
+    # Optional assistance diagnostics.
+    # Older trial CSVs do not contain these fields.
+    assistance_levels = [
+        int(row["assistance_level"])
+        for row in valid_records
+        if row.get("assistance_level") not in (None, "")
+    ]
+
+
     duration = (
 
         float(
@@ -1441,6 +1474,33 @@ def calculate_trial_summary(
                     )
                 ),
                 6
+            ),
+
+        "final_rotation_deficit_deg":
+            (
+                round(
+                    float(rotation_deficits[-1]),
+                    4
+                )
+                if rotation_deficits
+                else ""
+            ),
+
+        "final_rotation_completion_pct":
+            (
+                round(
+                    float(rotation_completions[-1]) * 100.0,
+                    1
+                )
+                if rotation_completions
+                else ""
+            ),
+
+        "max_assistance_level":
+            (
+                max(assistance_levels)
+                if assistance_levels
+                else ""
             )
     }
 
@@ -1531,10 +1591,23 @@ def save_trial(
         "nearest_reference_index",
         "reference_progress",
 
+        "learner_relative_rotation",
+        "expected_relative_rotation",
+        "rotation_deficit_deg",
+        "rotation_completion_ratio",
+
         "hesitation_state",
         "hesitation_event",
         "hesitation_duration",
-        "hesitation_progress_delta"
+        "hesitation_progress_delta",
+
+        "assistance_level",
+        "assistance_label",
+        "assistance_reason",
+        "assistance_cue",
+        "assistance_dominant_error",
+        "assistance_mild_duration",
+        "assistance_strong_duration"
     ]
 
 
@@ -1740,6 +1813,28 @@ def read_trial_file(
                         row["speed"]
                     )
 
+                    rotation_deficit_value = row.get(
+                        "rotation_deficit_deg",
+                        ""
+                    )
+
+                    rotation_completion_value = row.get(
+                        "rotation_completion_ratio",
+                        ""
+                    )
+
+                    record["rotation_deficit_deg"] = (
+                        float(rotation_deficit_value)
+                        if rotation_deficit_value not in (None, "")
+                        else ""
+                    )
+
+                    record["rotation_completion_ratio"] = (
+                        float(rotation_completion_value)
+                        if rotation_completion_value not in (None, "")
+                        else ""
+                    )
+
                 except Exception:
 
                     continue
@@ -1757,6 +1852,14 @@ def read_trial_file(
 
                 record[
                     "speed"
+                ] = ""
+
+                record[
+                    "rotation_deficit_deg"
+                ] = ""
+
+                record[
+                    "rotation_completion_ratio"
                 ] = ""
 
 
@@ -1934,7 +2037,12 @@ def generate_final_summary():
         "median_angle_error",
         "p90_angle_error",
 
-        "mean_speed"
+        "mean_speed",
+
+        "final_rotation_deficit_deg",
+        "final_rotation_completion_pct",
+
+        "max_assistance_level"
     ]
 
 
@@ -2066,10 +2174,27 @@ reference_bounds = (
 )
 
 
+# Online progress + relative-angle metrics
+online_motion_metrics = OnlineMotionMetrics(
+    reference
+)
+
+current_online_metric_result = None
+
+
 # Hesitation detector
 hesitation_detector = HesitationDetector()
 
 current_hesitation_result = None
+
+
+# Adaptive assistance policy
+#
+# The policy loads data-derived motion thresholds from
+# data/assistance_config.json and maintains Level 0-3 state.
+assistance_policy = AssistancePolicy()
+
+current_assistance_result = None
 
 
 # Calibration
@@ -2144,6 +2269,14 @@ current_nearest_index = None
 
 current_reference_progress = None
 
+current_learner_relative_rotation = None
+
+current_expected_relative_rotation = None
+
+current_rotation_deficit = None
+
+current_rotation_completion_ratio = None
+
 
 print()
 print(
@@ -2155,7 +2288,7 @@ print(
 )
 
 print(
-    "Clean Trial Workflow"
+    "Adaptive Assistance Workflow"
 )
 
 print()
@@ -2328,6 +2461,14 @@ with HandLandmarker.create_from_options(
         start_position_error = None
 
         current_reference_progress = None
+
+        current_learner_relative_rotation = None
+
+        current_expected_relative_rotation = None
+
+        current_rotation_deficit = None
+
+        current_rotation_completion_ratio = None
 
 
         # =================================================
@@ -2604,9 +2745,12 @@ with HandLandmarker.create_from_options(
 
 
                     # PATH ERROR
+                    #
+                    # Keep the validated global nearest-path distance
+                    # as the path-quality metric.
                     (
                         current_path_error,
-                        current_nearest_index
+                        _
                     ) = (
                         find_nearest_reference_point(
 
@@ -2619,42 +2763,111 @@ with HandLandmarker.create_from_options(
                     )
 
 
-                    current_reference_progress = (
+                    # ONLINE PROGRESS + RELATIVE ANGLE ERROR
+                    #
+                    # Progress is monotonic and angle error compares
+                    # learner relative rotation against the expected
+                    # reference rotation at the current progress.
+                    current_online_metric_result = (
+                        online_motion_metrics.update(
 
-                        current_nearest_index
+                            x_norm=
+                                current_x_norm,
 
-                        /
+                            y_norm=
+                                current_y_norm,
 
-                        max(
-                            len(reference)
-                            -
-                            1,
-                            1
+                            raw_angle=
+                                current_angle,
+
+                            tracking=True
                         )
                     )
 
 
-                    # ANGLE ERROR
-                    reference_angle = (
+                    current_nearest_index = (
+                        current_online_metric_result[
+                            "reference_index"
+                        ]
+                    )
 
-                        reference[
-                            current_nearest_index
-                        ][
-                            "angle_raw"
+
+                    current_reference_progress = (
+                        current_online_metric_result[
+                            "progress"
                         ]
                     )
 
 
                     current_angle_error = (
-                        abs(
-                            circular_angle_difference(
-
-                                current_angle,
-
-                                reference_angle
-                            )
-                        )
+                        current_online_metric_result[
+                            "relative_angle_error"
+                        ]
                     )
+
+
+                    current_learner_relative_rotation = (
+                        current_online_metric_result[
+                            "learner_relative_rotation"
+                        ]
+                    )
+
+
+                    current_expected_relative_rotation = (
+                        current_online_metric_result[
+                            "expected_relative_rotation"
+                        ]
+                    )
+
+
+                    # ROTATION DIAGNOSTICS
+                    #
+                    # Positive deficit means the learner has rotated
+                    # less than expected in the reference direction.
+                    # Completion ratio is only reported after the
+                    # expected rotation is large enough to be stable.
+                    reference_total_rotation = float(
+                        online_motion_metrics.
+                        reference_relative_rotation[-1]
+                    )
+
+                    rotation_direction = (
+                        1.0
+                        if reference_total_rotation >= 0.0
+                        else -1.0
+                    )
+
+                    expected_aligned = (
+                        current_expected_relative_rotation
+                        * rotation_direction
+                    )
+
+                    learner_aligned = (
+                        current_learner_relative_rotation
+                        * rotation_direction
+                    )
+
+                    current_rotation_deficit = (
+                        expected_aligned
+                        - learner_aligned
+                    )
+
+                    if (
+                        current_reference_progress
+                        >= ROTATION_DIAGNOSTIC_MIN_PROGRESS
+                        and
+                        expected_aligned
+                        >= ROTATION_DIAGNOSTIC_MIN_EXPECTED_DEG
+                    ):
+
+                        current_rotation_completion_ratio = (
+                            learner_aligned
+                            / expected_aligned
+                        )
+
+                    else:
+
+                        current_rotation_completion_ratio = None
 
 
                     # SPEED
@@ -2755,6 +2968,41 @@ with HandLandmarker.create_from_options(
 
                             progress=
                                 current_reference_progress,
+
+                            tracking=True
+                        )
+                    )
+
+
+                    # ADAPTIVE ASSISTANCE
+                    #
+                    # Feed the current online motion evidence and
+                    # hesitation state into the explainable Level 0-3
+                    # policy. The policy itself handles persistence,
+                    # recovery, and escalation.
+                    current_assistance_result = (
+                        assistance_policy.update(
+
+                            timestamp=
+                                hesitation_timestamp,
+
+                            path_error=
+                                current_path_error,
+
+                            relative_angle_error=
+                                current_angle_error,
+
+                            progress=
+                                current_reference_progress,
+
+                            learner_rotation=
+                                current_learner_relative_rotation,
+
+                            expected_rotation=
+                                current_expected_relative_rotation,
+
+                            hesitation_result=
+                                current_hesitation_result,
 
                             tracking=True
                         )
@@ -2865,26 +3113,54 @@ with HandLandmarker.create_from_options(
                 )
 
 
-            put_text(
-                frame,
-                "TRACKING LOST",
-                (
-                    int(
-                        20
-                        *
-                        ui
-                    ),
+                current_assistance_result = (
+                    assistance_policy.update(
 
-                    int(
-                        60
-                        *
-                        ui
+                        timestamp=
+                            hesitation_timestamp,
+
+                        path_error=0.0,
+
+                        relative_angle_error=0.0,
+
+                        progress=0.0,
+
+                        learner_rotation=0.0,
+
+                        expected_rotation=0.0,
+
+                        hesitation_result=
+                            current_hesitation_result,
+
+                        tracking=False
                     )
-                ),
-                ui,
-                0.82,
-                3
-            )
+                )
+
+
+            # TRACKING LOST is useful only during an active trial.
+            # Never draw it on the post-trial review screen.
+            if practicing:
+
+                put_text(
+                    frame,
+                    "TRACKING LOST",
+                    (
+                        int(
+                            20
+                            *
+                            ui
+                        ),
+
+                        int(
+                            60
+                            *
+                            ui
+                        )
+                    ),
+                    ui,
+                    0.82,
+                    3
+                )
 
 
         # =================================================
@@ -2960,6 +3236,47 @@ with HandLandmarker.create_from_options(
                 )
 
 
+                if current_assistance_result is None:
+
+                    assistance_level = 0
+                    assistance_label = "OBSERVE"
+                    assistance_reason = "Within calibrated baseline"
+                    assistance_cue = "No assistance"
+                    assistance_dominant_error = "NONE"
+                    assistance_mild_duration = 0.0
+                    assistance_strong_duration = 0.0
+
+                else:
+
+                    assistance_level = int(
+                        current_assistance_result["level"]
+                    )
+
+                    assistance_label = (
+                        current_assistance_result["label"]
+                    )
+
+                    assistance_reason = (
+                        current_assistance_result["reason"]
+                    )
+
+                    assistance_cue = (
+                        current_assistance_result["cue"]
+                    )
+
+                    assistance_dominant_error = (
+                        current_assistance_result["dominant_error"]
+                    )
+
+                    assistance_mild_duration = (
+                        current_assistance_result["mild_duration_sec"]
+                    )
+
+                    assistance_strong_duration = (
+                        current_assistance_result["strong_duration_sec"]
+                    )
+
+
                 trial_records.append({
 
                     "timestamp":
@@ -3004,6 +3321,18 @@ with HandLandmarker.create_from_options(
                     "reference_progress":
                         reference_progress,
 
+                    "learner_relative_rotation":
+                        current_learner_relative_rotation,
+
+                    "expected_relative_rotation":
+                        current_expected_relative_rotation,
+
+                    "rotation_deficit_deg":
+                        current_rotation_deficit,
+
+                    "rotation_completion_ratio":
+                        current_rotation_completion_ratio,
+
                     "hesitation_state":
                         hesitation_state,
 
@@ -3014,7 +3343,28 @@ with HandLandmarker.create_from_options(
                         hesitation_duration,
 
                     "hesitation_progress_delta":
-                        hesitation_progress_delta
+                        hesitation_progress_delta,
+
+                    "assistance_level":
+                        assistance_level,
+
+                    "assistance_label":
+                        assistance_label,
+
+                    "assistance_reason":
+                        assistance_reason,
+
+                    "assistance_cue":
+                        assistance_cue,
+
+                    "assistance_dominant_error":
+                        assistance_dominant_error,
+
+                    "assistance_mild_duration":
+                        assistance_mild_duration,
+
+                    "assistance_strong_duration":
+                        assistance_strong_duration
                 })
 
 
@@ -3049,6 +3399,14 @@ with HandLandmarker.create_from_options(
 
                     "reference_progress": "",
 
+                    "learner_relative_rotation": "",
+
+                    "expected_relative_rotation": "",
+
+                    "rotation_deficit_deg": "",
+
+                    "rotation_completion_ratio": "",
+
                     "hesitation_state":
                         (
                             current_hesitation_result["state"]
@@ -3060,7 +3418,56 @@ with HandLandmarker.create_from_options(
 
                     "hesitation_duration": 0.0,
 
-                    "hesitation_progress_delta": 0.0
+                    "hesitation_progress_delta": 0.0,
+
+                    "assistance_level":
+                        (
+                            int(current_assistance_result["level"])
+                            if current_assistance_result is not None
+                            else 0
+                        ),
+
+                    "assistance_label":
+                        (
+                            current_assistance_result["label"]
+                            if current_assistance_result is not None
+                            else "OBSERVE"
+                        ),
+
+                    "assistance_reason":
+                        (
+                            current_assistance_result["reason"]
+                            if current_assistance_result is not None
+                            else "Tracking unavailable"
+                        ),
+
+                    "assistance_cue":
+                        (
+                            current_assistance_result["cue"]
+                            if current_assistance_result is not None
+                            else "No assistance"
+                        ),
+
+                    "assistance_dominant_error":
+                        (
+                            current_assistance_result["dominant_error"]
+                            if current_assistance_result is not None
+                            else "NONE"
+                        ),
+
+                    "assistance_mild_duration":
+                        (
+                            current_assistance_result["mild_duration_sec"]
+                            if current_assistance_result is not None
+                            else 0.0
+                        ),
+
+                    "assistance_strong_duration":
+                        (
+                            current_assistance_result["strong_duration_sec"]
+                            if current_assistance_result is not None
+                            else 0.0
+                        )
                 })
 
 
@@ -3315,7 +3722,7 @@ with HandLandmarker.create_from_options(
                 put_text(
                     frame,
                     (
-                        "ANGLE ERROR: "
+                        "REL ANGLE ERROR: "
                         f"{current_angle_error:.1f} deg"
                     ),
                     (
@@ -3470,6 +3877,101 @@ with HandLandmarker.create_from_options(
             )
 
 
+            # ---------------------------------------------
+            # ADAPTIVE ASSISTANCE UI
+            # ---------------------------------------------
+
+            if current_assistance_result is None:
+
+                assistance_level = 0
+                assistance_label = "OBSERVE"
+                assistance_reason = "Within calibrated baseline"
+                assistance_cue = "No assistance"
+
+            else:
+
+                assistance_level = int(
+                    current_assistance_result["level"]
+                )
+
+                assistance_label = (
+                    current_assistance_result["label"]
+                )
+
+                assistance_reason = (
+                    current_assistance_result["reason"]
+                )
+
+                assistance_cue = (
+                    current_assistance_result["cue"]
+                )
+
+
+            assistance_colors = {
+                0: (255, 255, 255),
+                1: (0, 255, 255),
+                2: (0, 165, 255),
+                3: (0, 0, 255)
+            }
+
+            assistance_color = assistance_colors.get(
+                assistance_level,
+                (255, 255, 255)
+            )
+
+
+            put_text(
+                frame,
+                (
+                    "ASSISTANCE: L"
+                    f"{assistance_level} "
+                    f"{assistance_label}"
+                ),
+                (
+                    int(18 * ui),
+                    top + gap * 4
+                ),
+                ui,
+                0.54,
+                2,
+                assistance_color
+            )
+
+
+            put_text(
+                frame,
+                (
+                    "REASON: "
+                    f"{assistance_reason}"
+                ),
+                (
+                    int(18 * ui),
+                    top + gap * 5
+                ),
+                ui,
+                0.45,
+                1,
+                assistance_color
+            )
+
+
+            put_text(
+                frame,
+                (
+                    "CUE: "
+                    f"{assistance_cue}"
+                ),
+                (
+                    int(18 * ui),
+                    top + gap * 6
+                ),
+                ui,
+                0.45,
+                1,
+                assistance_color
+            )
+
+
         # =================================================
         # REVIEW SUMMARY
         # =================================================
@@ -3521,7 +4023,7 @@ with HandLandmarker.create_from_options(
             put_text(
                 frame,
                 (
-                    "MEAN ANGLE: "
+                    "MEAN REL ANGLE: "
                     f"{last_review_summary['mean_angle_error']:.1f} deg"
                 ),
                 (
@@ -3529,6 +4031,76 @@ with HandLandmarker.create_from_options(
                     text_y
                     +
                     text_gap
+                ),
+                ui,
+                0.46,
+                1
+            )
+
+
+            completion_pct = last_review_summary.get(
+                "final_rotation_completion_pct",
+                ""
+            )
+
+            deficit_deg = last_review_summary.get(
+                "final_rotation_deficit_deg",
+                ""
+            )
+
+            if completion_pct != "":
+
+                completion_text = (
+                    "END ROT COMPLETE: "
+                    f"{float(completion_pct):.0f}%"
+                )
+
+            else:
+
+                completion_text = (
+                    "END ROT COMPLETE: N/A"
+                )
+
+            put_text(
+                frame,
+                completion_text,
+                (
+                    text_x,
+                    text_y
+                    +
+                    text_gap
+                    *
+                    2
+                ),
+                ui,
+                0.46,
+                1
+            )
+
+
+            if deficit_deg != "":
+
+                deficit_text = (
+                    "END ROT DEFICIT: "
+                    f"{float(deficit_deg):.1f} deg"
+                )
+
+            else:
+
+                deficit_text = (
+                    "END ROT DEFICIT: N/A"
+                )
+
+            put_text(
+                frame,
+                deficit_text,
+                (
+                    text_x,
+                    text_y
+                    +
+                    text_gap
+                    *
+                    3
                 ),
                 ui,
                 0.46,
@@ -3548,7 +4120,43 @@ with HandLandmarker.create_from_options(
                     +
                     text_gap
                     *
-                    2
+                    4
+                ),
+                ui,
+                0.46,
+                1
+            )
+
+
+            max_assistance_level = last_review_summary.get(
+                "max_assistance_level",
+                ""
+            )
+
+            if max_assistance_level != "":
+
+                assistance_summary_text = (
+                    "MAX ASSISTANCE: L"
+                    f"{int(max_assistance_level)}"
+                )
+
+            else:
+
+                assistance_summary_text = (
+                    "MAX ASSISTANCE: N/A"
+                )
+
+
+            put_text(
+                frame,
+                assistance_summary_text,
+                (
+                    text_x,
+                    text_y
+                    +
+                    text_gap
+                    *
+                    5
                 ),
                 ui,
                 0.46,
@@ -3565,7 +4173,7 @@ with HandLandmarker.create_from_options(
                     +
                     text_gap
                     *
-                    3
+                    6
                 ),
                 ui,
                 0.42,
@@ -3643,7 +4251,7 @@ with HandLandmarker.create_from_options(
         cv2.imshow(
             (
                 "AdaptiveSkill - "
-                "Clean Trial Workflow"
+                "Adaptive Assistance"
             ),
             frame
         )
@@ -3765,6 +4373,10 @@ with HandLandmarker.create_from_options(
                 hesitation_detector.reset()
 
                 current_hesitation_result = None
+
+                assistance_policy.reset()
+
+                current_assistance_result = None
 
 
                 trial_finished = False
@@ -3918,9 +4530,17 @@ with HandLandmarker.create_from_options(
 
                     speed_history.clear()
 
+                    online_motion_metrics.reset()
+
+                    current_online_metric_result = None
+
                     hesitation_detector.reset()
 
                     current_hesitation_result = None
+
+                    assistance_policy.reset()
+
+                    current_assistance_result = None
 
 
                     previous_norm_x = None
@@ -3937,9 +4557,17 @@ with HandLandmarker.create_from_options(
 
                     current_angle_error = None
 
+                    current_rotation_deficit = None
+
+                    current_rotation_completion_ratio = None
+
                     current_nearest_index = None
 
                     current_reference_progress = None
+
+                    current_learner_relative_rotation = None
+
+                    current_expected_relative_rotation = None
 
 
                     last_review_summary = None
@@ -4068,6 +4696,10 @@ with HandLandmarker.create_from_options(
 
 
                 learner_trail.clear()
+
+                assistance_policy.reset()
+
+                current_assistance_result = None
 
 
         # =================================================
