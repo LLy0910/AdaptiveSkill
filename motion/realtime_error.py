@@ -12,6 +12,8 @@ import numpy as np
 from hesitation_detector import HesitationDetector
 from online_motion_metrics import OnlineMotionMetrics
 from assistance_policy import AssistancePolicy
+from feedback_controller import FeedbackController
+from voice_feedback import VoiceFeedback
 
 
 # =========================================================
@@ -1607,7 +1609,14 @@ def save_trial(
         "assistance_cue",
         "assistance_dominant_error",
         "assistance_mild_duration",
-        "assistance_strong_duration"
+        "assistance_strong_duration",
+
+        "feedback_type",
+        "feedback_visual_title",
+        "feedback_visual_message",
+        "feedback_voice_message",
+        "feedback_should_speak",
+        "feedback_voice_queued"
     ]
 
 
@@ -2197,6 +2206,63 @@ assistance_policy = AssistancePolicy()
 current_assistance_result = None
 
 
+# Multimodal feedback controller
+#
+# L0: quiet observation
+# L1: visual gentle cue
+# L2: explicit visual + gated speech
+# L3: human-assistance visual + gated speech
+feedback_controller = FeedbackController(
+    voice_cooldown_sec=3.0
+)
+
+current_feedback_result = None
+
+
+# Non-blocking Windows voice worker.
+# The worker speaks outside the camera loop.
+voice_feedback = VoiceFeedback(
+    enabled=True,
+    rate=0,
+    volume=100
+)
+
+
+# Give the background worker a brief chance to initialize.
+# If voice is unavailable, the visual feedback still works.
+for _ in range(20):
+
+    if (
+        voice_feedback.ready
+        or
+        voice_feedback.error is not None
+    ):
+        break
+
+    time.sleep(0.1)
+
+
+if voice_feedback.ready:
+
+    print(
+        "Voice feedback: READY"
+    )
+
+elif voice_feedback.error is not None:
+
+    print(
+        "Voice feedback unavailable:",
+        voice_feedback.error
+    )
+
+else:
+
+    print(
+        "Voice feedback: initializing; "
+        "visual feedback remains available."
+    )
+
+
 # Calibration
 calibrating = False
 
@@ -2395,6 +2461,12 @@ with HandLandmarker.create_from_options(
         ui = get_ui_scale(
             frame
         )
+
+
+        # Multimodal feedback is computed fresh for each frame.
+        # The controller itself keeps temporal speech history.
+        current_feedback_result = None
+        voice_queued_this_frame = False
 
 
         # =================================================
@@ -3009,6 +3081,54 @@ with HandLandmarker.create_from_options(
                     )
 
 
+                    # MULTIMODAL FEEDBACK
+                    # Convert assistance state into user-facing visual
+                    # guidance and a gated spoken message.
+                    current_feedback_result = (
+                        feedback_controller.update(
+
+                            timestamp=
+                                hesitation_timestamp,
+
+                            assistance_result=
+                                current_assistance_result
+                        )
+                    )
+
+
+                    # If the user has recovered below spoken-feedback
+                    # levels, discard speech that has not started yet.
+                    if (
+                        current_feedback_result.level < 2
+                        and
+                        voice_feedback.pending_count > 0
+                    ):
+
+                        voice_feedback.clear()
+
+
+                    if (
+                        current_feedback_result.should_speak
+                        and
+                        current_feedback_result.voice_message
+                        and
+                        voice_feedback.ready
+                    ):
+
+                        voice_queued_this_frame = (
+                            voice_feedback.speak(
+                                current_feedback_result.voice_message
+                            )
+                        )
+
+                        if voice_queued_this_frame:
+
+                            print(
+                                "VOICE FEEDBACK:",
+                                current_feedback_result.voice_message
+                            )
+
+
                     if current_hesitation_result[
                         "event"
                     ]:
@@ -3135,6 +3255,12 @@ with HandLandmarker.create_from_options(
                         tracking=False
                     )
                 )
+
+
+                # Do not let stale spoken guidance play while tracking
+                # is unavailable.
+                if voice_feedback.pending_count > 0:
+                    voice_feedback.clear()
 
 
             # TRACKING LOST is useful only during an active trial.
@@ -3277,6 +3403,45 @@ with HandLandmarker.create_from_options(
                     )
 
 
+                # User-facing multimodal feedback diagnostics.
+                if current_feedback_result is None:
+
+                    feedback_type = "NONE"
+                    feedback_visual_title = "OBSERVE"
+                    feedback_visual_message = "Continue the movement."
+                    feedback_voice_message = ""
+                    feedback_should_speak = 0
+                    feedback_voice_queued = 0
+
+                else:
+
+                    feedback_type = (
+                        current_feedback_result.feedback_type
+                    )
+
+                    feedback_visual_title = (
+                        current_feedback_result.visual_title
+                    )
+
+                    feedback_visual_message = (
+                        current_feedback_result.visual_message
+                    )
+
+                    feedback_voice_message = (
+                        current_feedback_result.voice_message
+                        or
+                        ""
+                    )
+
+                    feedback_should_speak = int(
+                        current_feedback_result.should_speak
+                    )
+
+                    feedback_voice_queued = int(
+                        voice_queued_this_frame
+                    )
+
+
                 trial_records.append({
 
                     "timestamp":
@@ -3364,7 +3529,25 @@ with HandLandmarker.create_from_options(
                         assistance_mild_duration,
 
                     "assistance_strong_duration":
-                        assistance_strong_duration
+                        assistance_strong_duration,
+
+                    "feedback_type":
+                        feedback_type,
+
+                    "feedback_visual_title":
+                        feedback_visual_title,
+
+                    "feedback_visual_message":
+                        feedback_visual_message,
+
+                    "feedback_voice_message":
+                        feedback_voice_message,
+
+                    "feedback_should_speak":
+                        feedback_should_speak,
+
+                    "feedback_voice_queued":
+                        feedback_voice_queued
                 })
 
 
@@ -3467,7 +3650,25 @@ with HandLandmarker.create_from_options(
                             current_assistance_result["strong_duration_sec"]
                             if current_assistance_result is not None
                             else 0.0
-                        )
+                        ),
+
+                    "feedback_type":
+                        "NO_TRACKING",
+
+                    "feedback_visual_title":
+                        "",
+
+                    "feedback_visual_message":
+                        "",
+
+                    "feedback_voice_message":
+                        "",
+
+                    "feedback_should_speak":
+                        0,
+
+                    "feedback_voice_queued":
+                        0
                 })
 
 
@@ -3955,11 +4156,31 @@ with HandLandmarker.create_from_options(
             )
 
 
+            # ---------------------------------------------
+            # USER-FACING MULTIMODAL FEEDBACK UI
+            # ---------------------------------------------
+
+            if current_feedback_result is None:
+
+                feedback_title = "OBSERVE"
+                feedback_message = "Continue the movement."
+
+            else:
+
+                feedback_title = (
+                    current_feedback_result.visual_title
+                )
+
+                feedback_message = (
+                    current_feedback_result.visual_message
+                )
+
+
             put_text(
                 frame,
                 (
-                    "CUE: "
-                    f"{assistance_cue}"
+                    "FEEDBACK: "
+                    f"{feedback_title}"
                 ),
                 (
                     int(18 * ui),
@@ -3967,6 +4188,88 @@ with HandLandmarker.create_from_options(
                 ),
                 ui,
                 0.45,
+                1,
+                assistance_color
+            )
+
+
+            feedback_words = str(
+                feedback_message
+            ).split()
+
+            feedback_lines = []
+            current_line = ""
+
+            for word in feedback_words:
+
+                candidate = (
+                    word
+                    if not current_line
+                    else current_line + " " + word
+                )
+
+                if len(candidate) <= 48:
+                    current_line = candidate
+
+                else:
+                    if current_line:
+                        feedback_lines.append(
+                            current_line
+                        )
+                    current_line = word
+
+            if current_line:
+                feedback_lines.append(
+                    current_line
+                )
+
+            if not feedback_lines:
+                feedback_lines = [""]
+
+
+            for line_index, line in enumerate(
+                feedback_lines[:2]
+            ):
+
+                prefix = (
+                    "ACTION: "
+                    if line_index == 0
+                    else "        "
+                )
+
+                put_text(
+                    frame,
+                    prefix + line,
+                    (
+                        int(18 * ui),
+                        top + gap * (7 + line_index)
+                    ),
+                    ui,
+                    0.42,
+                    1,
+                    assistance_color
+                )
+
+
+            if voice_queued_this_frame:
+                voice_status_text = "VOICE: QUEUED"
+
+            elif voice_feedback.ready:
+                voice_status_text = "VOICE: READY"
+
+            else:
+                voice_status_text = "VOICE: UNAVAILABLE"
+
+
+            put_text(
+                frame,
+                voice_status_text,
+                (
+                    int(18 * ui),
+                    top + gap * 9
+                ),
+                ui,
+                0.40,
                 1,
                 assistance_color
             )
@@ -4251,7 +4554,7 @@ with HandLandmarker.create_from_options(
         cv2.imshow(
             (
                 "AdaptiveSkill - "
-                "Adaptive Assistance"
+                "Multimodal Adaptive Assistance"
             ),
             frame
         )
@@ -4377,6 +4680,10 @@ with HandLandmarker.create_from_options(
                 assistance_policy.reset()
 
                 current_assistance_result = None
+
+                feedback_controller.reset()
+                current_feedback_result = None
+                voice_feedback.clear()
 
 
                 trial_finished = False
@@ -4542,6 +4849,10 @@ with HandLandmarker.create_from_options(
 
                     current_assistance_result = None
 
+                    feedback_controller.reset()
+                    current_feedback_result = None
+                    voice_feedback.clear()
+
 
                     previous_norm_x = None
 
@@ -4594,6 +4905,9 @@ with HandLandmarker.create_from_options(
                 practicing = False
 
                 trial_finished = True
+
+                # Do not carry queued guidance into the review screen.
+                voice_feedback.clear()
 
 
                 (
@@ -4701,6 +5015,10 @@ with HandLandmarker.create_from_options(
 
                 current_assistance_result = None
 
+                feedback_controller.reset()
+                current_feedback_result = None
+                voice_feedback.clear()
+
 
         # =================================================
         # T = GENERATE CLEAN FINAL SUMMARY
@@ -4747,6 +5065,11 @@ with HandLandmarker.create_from_options(
 # =========================================================
 # 24. CLOSE
 # =========================================================
+
+# Shut down the background speech worker before closing.
+voice_feedback.shutdown(
+    wait=True
+)
 
 cap.release()
 
