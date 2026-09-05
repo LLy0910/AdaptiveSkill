@@ -2,7 +2,7 @@ import json
 import math
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 
 # =========================================================
@@ -26,13 +26,14 @@ class TaskConstraintResult:
 
     IMPORTANT:
     This is NOT:
+
         - psychological-state detection
         - user competence estimation
         - complete demonstration-quality estimation
         - expert-reference correctness
 
     It only describes whether the current movement
-    remains safe / valid with respect to the task.
+    remains safe / valid with respect to task constraints.
     """
 
     state: str
@@ -57,7 +58,6 @@ class TaskConstraintResult:
 
 
     def to_dict(self):
-
         return asdict(self)
 
 
@@ -71,7 +71,6 @@ def distance(
     x2,
     y2
 ):
-
     return math.hypot(
         float(x2) - float(x1),
         float(y2) - float(y1)
@@ -82,7 +81,6 @@ def circular_difference_deg(
     angle_deg,
     target_deg
 ):
-
     """
     Signed shortest angular difference.
 
@@ -108,11 +106,10 @@ def point_inside_rectangle(
     y,
     obstacle
 ):
-
     return (
         obstacle["x_min"]
         <=
-        x
+        float(x)
         <=
         obstacle["x_max"]
 
@@ -120,7 +117,7 @@ def point_inside_rectangle(
 
         obstacle["y_min"]
         <=
-        y
+        float(y)
         <=
         obstacle["y_max"]
     )
@@ -131,7 +128,6 @@ def point_to_rectangle_distance(
     y,
     obstacle
 ):
-
     """
     Shortest Euclidean distance between
     a point and an axis-aligned rectangle.
@@ -145,21 +141,20 @@ def point_to_rectangle_distance(
         y,
         obstacle
     ):
-
         return 0.0
 
 
     dx = max(
-        obstacle["x_min"] - x,
+        obstacle["x_min"] - float(x),
         0.0,
-        x - obstacle["x_max"]
+        float(x) - obstacle["x_max"]
     )
 
 
     dy = max(
-        obstacle["y_min"] - y,
+        obstacle["y_min"] - float(y),
         0.0,
-        y - obstacle["y_max"]
+        float(y) - obstacle["y_max"]
     )
 
 
@@ -167,6 +162,595 @@ def point_to_rectangle_distance(
         dx,
         dy
     )
+
+
+# =========================================================
+# SEGMENT GEOMETRY
+# =========================================================
+
+def cross_product(
+    ax,
+    ay,
+    bx,
+    by,
+    cx,
+    cy
+):
+    """
+    2D cross product for orientation tests.
+    """
+
+    return (
+        (
+            float(bx) - float(ax)
+        )
+        *
+        (
+            float(cy) - float(ay)
+        )
+        -
+        (
+            float(by) - float(ay)
+        )
+        *
+        (
+            float(cx) - float(ax)
+        )
+    )
+
+
+def point_on_segment(
+    px,
+    py,
+    ax,
+    ay,
+    bx,
+    by,
+    epsilon=1e-9
+):
+    """
+    Check whether point P lies on line segment AB.
+    """
+
+    cross = cross_product(
+        ax,
+        ay,
+        bx,
+        by,
+        px,
+        py
+    )
+
+    if abs(cross) > epsilon:
+        return False
+
+
+    return (
+        min(
+            float(ax),
+            float(bx)
+        ) - epsilon
+        <=
+        float(px)
+        <=
+        max(
+            float(ax),
+            float(bx)
+        ) + epsilon
+
+        and
+
+        min(
+            float(ay),
+            float(by)
+        ) - epsilon
+        <=
+        float(py)
+        <=
+        max(
+            float(ay),
+            float(by)
+        ) + epsilon
+    )
+
+
+def segments_intersect(
+    ax,
+    ay,
+    bx,
+    by,
+    cx,
+    cy,
+    dx,
+    dy,
+    epsilon=1e-9
+):
+    """
+    Inclusive segment intersection.
+
+    Touching a boundary counts as intersection.
+    """
+
+    o1 = cross_product(
+        ax,
+        ay,
+        bx,
+        by,
+        cx,
+        cy
+    )
+
+    o2 = cross_product(
+        ax,
+        ay,
+        bx,
+        by,
+        dx,
+        dy
+    )
+
+    o3 = cross_product(
+        cx,
+        cy,
+        dx,
+        dy,
+        ax,
+        ay
+    )
+
+    o4 = cross_product(
+        cx,
+        cy,
+        dx,
+        dy,
+        bx,
+        by
+    )
+
+
+    # Proper intersection.
+    if (
+        (
+            o1 > epsilon
+            and
+            o2 < -epsilon
+        )
+        or
+        (
+            o1 < -epsilon
+            and
+            o2 > epsilon
+        )
+    ) and (
+        (
+            o3 > epsilon
+            and
+            o4 < -epsilon
+        )
+        or
+        (
+            o3 < -epsilon
+            and
+            o4 > epsilon
+        )
+    ):
+        return True
+
+
+    # Collinear / boundary cases.
+    if (
+        abs(o1) <= epsilon
+        and
+        point_on_segment(
+            cx,
+            cy,
+            ax,
+            ay,
+            bx,
+            by
+        )
+    ):
+        return True
+
+
+    if (
+        abs(o2) <= epsilon
+        and
+        point_on_segment(
+            dx,
+            dy,
+            ax,
+            ay,
+            bx,
+            by
+        )
+    ):
+        return True
+
+
+    if (
+        abs(o3) <= epsilon
+        and
+        point_on_segment(
+            ax,
+            ay,
+            cx,
+            cy,
+            dx,
+            dy
+        )
+    ):
+        return True
+
+
+    if (
+        abs(o4) <= epsilon
+        and
+        point_on_segment(
+            bx,
+            by,
+            cx,
+            cy,
+            dx,
+            dy
+        )
+    ):
+        return True
+
+
+    return False
+
+
+def point_to_segment_distance(
+    px,
+    py,
+    ax,
+    ay,
+    bx,
+    by
+):
+    """
+    Shortest Euclidean distance
+    from point P to segment AB.
+    """
+
+    ab_x = float(bx) - float(ax)
+    ab_y = float(by) - float(ay)
+
+    ap_x = float(px) - float(ax)
+    ap_y = float(py) - float(ay)
+
+
+    ab_len_sq = (
+        ab_x * ab_x
+        +
+        ab_y * ab_y
+    )
+
+
+    if ab_len_sq < 1e-12:
+
+        return math.hypot(
+            float(px) - float(ax),
+            float(py) - float(ay)
+        )
+
+
+    t = (
+        ap_x * ab_x
+        +
+        ap_y * ab_y
+    ) / ab_len_sq
+
+
+    t = max(
+        0.0,
+        min(
+            1.0,
+            t
+        )
+    )
+
+
+    closest_x = (
+        float(ax)
+        +
+        t * ab_x
+    )
+
+
+    closest_y = (
+        float(ay)
+        +
+        t * ab_y
+    )
+
+
+    return math.hypot(
+        float(px) - closest_x,
+        float(py) - closest_y
+    )
+
+
+def segment_to_segment_distance(
+    ax,
+    ay,
+    bx,
+    by,
+    cx,
+    cy,
+    dx,
+    dy
+):
+    """
+    Shortest distance between two 2D line segments.
+    """
+
+    if segments_intersect(
+        ax,
+        ay,
+        bx,
+        by,
+        cx,
+        cy,
+        dx,
+        dy
+    ):
+        return 0.0
+
+
+    return min(
+
+        point_to_segment_distance(
+            ax,
+            ay,
+            cx,
+            cy,
+            dx,
+            dy
+        ),
+
+        point_to_segment_distance(
+            bx,
+            by,
+            cx,
+            cy,
+            dx,
+            dy
+        ),
+
+        point_to_segment_distance(
+            cx,
+            cy,
+            ax,
+            ay,
+            bx,
+            by
+        ),
+
+        point_to_segment_distance(
+            dx,
+            dy,
+            ax,
+            ay,
+            bx,
+            by
+        )
+    )
+
+
+def segment_intersects_rectangle(
+    x1,
+    y1,
+    x2,
+    y2,
+    obstacle
+):
+    """
+    Returns True when any part of segment
+    intersects or touches the obstacle rectangle.
+    """
+
+    # Endpoint already inside.
+    if point_inside_rectangle(
+        x1,
+        y1,
+        obstacle
+    ):
+        return True
+
+
+    if point_inside_rectangle(
+        x2,
+        y2,
+        obstacle
+    ):
+        return True
+
+
+    x_min = float(
+        obstacle["x_min"]
+    )
+
+    x_max = float(
+        obstacle["x_max"]
+    )
+
+    y_min = float(
+        obstacle["y_min"]
+    )
+
+    y_max = float(
+        obstacle["y_max"]
+    )
+
+
+    edges = [
+
+        # Top
+        (
+            x_min,
+            y_min,
+            x_max,
+            y_min
+        ),
+
+        # Right
+        (
+            x_max,
+            y_min,
+            x_max,
+            y_max
+        ),
+
+        # Bottom
+        (
+            x_max,
+            y_max,
+            x_min,
+            y_max
+        ),
+
+        # Left
+        (
+            x_min,
+            y_max,
+            x_min,
+            y_min
+        ),
+    ]
+
+
+    for (
+        ax,
+        ay,
+        bx,
+        by
+    ) in edges:
+
+        if segments_intersect(
+            x1,
+            y1,
+            x2,
+            y2,
+            ax,
+            ay,
+            bx,
+            by
+        ):
+            return True
+
+
+    return False
+
+
+def segment_to_rectangle_distance(
+    x1,
+    y1,
+    x2,
+    y2,
+    obstacle
+):
+    """
+    Shortest distance between a movement segment
+    and an axis-aligned obstacle rectangle.
+
+    If segment crosses / touches obstacle:
+        0.0
+    """
+
+    if segment_intersects_rectangle(
+        x1,
+        y1,
+        x2,
+        y2,
+        obstacle
+    ):
+        return 0.0
+
+
+    x_min = float(
+        obstacle["x_min"]
+    )
+
+    x_max = float(
+        obstacle["x_max"]
+    )
+
+    y_min = float(
+        obstacle["y_min"]
+    )
+
+    y_max = float(
+        obstacle["y_max"]
+    )
+
+
+    edges = [
+
+        (
+            x_min,
+            y_min,
+            x_max,
+            y_min
+        ),
+
+        (
+            x_max,
+            y_min,
+            x_max,
+            y_max
+        ),
+
+        (
+            x_max,
+            y_max,
+            x_min,
+            y_max
+        ),
+
+        (
+            x_min,
+            y_max,
+            x_min,
+            y_min
+        ),
+    ]
+
+
+    best_distance = float(
+        "inf"
+    )
+
+
+    for (
+        ax,
+        ay,
+        bx,
+        by
+    ) in edges:
+
+        current_distance = (
+            segment_to_segment_distance(
+                x1,
+                y1,
+                x2,
+                y2,
+                ax,
+                ay,
+                bx,
+                by
+            )
+        )
+
+
+        best_distance = min(
+            best_distance,
+            current_distance
+        )
+
+
+    return best_distance
 
 
 # =========================================================
@@ -185,6 +769,14 @@ class TaskConstraintEvaluator:
         4. Virtual-object orientation
         5. Tracking reliability
 
+    It supports:
+
+        evaluate(...)
+            point / current-frame evaluation
+
+        evaluate_segment(...)
+            movement-segment evaluation
+
     Reference-trajectory similarity is intentionally
     NOT used as the definition of correctness.
     """
@@ -194,10 +786,6 @@ class TaskConstraintEvaluator:
         self,
         config_path=None
     ):
-
-        # -------------------------------------------------
-        # Load configuration
-        # -------------------------------------------------
 
         if config_path is None:
 
@@ -217,16 +805,12 @@ class TaskConstraintEvaluator:
             self.config_path,
             "r",
             encoding="utf-8"
-        ) as f:
+        ) as file:
 
             self.config = json.load(
-                f
+                file
             )
 
-
-        # -------------------------------------------------
-        # Task configuration
-        # -------------------------------------------------
 
         self.target = (
             self.config["target"]
@@ -279,7 +863,7 @@ class TaskConstraintEvaluator:
 
 
     # =====================================================
-    # EVALUATE
+    # POINT EVALUATION
     # =====================================================
 
     def evaluate(
@@ -303,7 +887,7 @@ class TaskConstraintEvaluator:
 
 
         # =================================================
-        # 1. TRACKING RELIABILITY
+        # TRACKING
         # =================================================
 
         tracking_reliable = (
@@ -367,18 +951,16 @@ class TaskConstraintEvaluator:
 
 
         # =================================================
-        # 2. GOAL
+        # GOAL
         # =================================================
 
         target_x = float(
             self.target["x"]
         )
 
-
         target_y = float(
             self.target["y"]
         )
-
 
         target_radius = float(
             self.target["radius"]
@@ -386,10 +968,8 @@ class TaskConstraintEvaluator:
 
 
         distance_to_goal = distance(
-
             x,
             y,
-
             target_x,
             target_y
         )
@@ -406,11 +986,10 @@ class TaskConstraintEvaluator:
 
 
         # =================================================
-        # 3. OBSTACLE
+        # OBSTACLE
         # =================================================
 
         obstacle_violation = False
-
         obstacle_risk = False
 
         nearest_clearance = float(
@@ -423,7 +1002,6 @@ class TaskConstraintEvaluator:
         for obstacle in self.obstacles:
 
             inside = point_inside_rectangle(
-
                 x,
                 y,
                 obstacle
@@ -432,17 +1010,12 @@ class TaskConstraintEvaluator:
 
             clearance = (
                 point_to_rectangle_distance(
-
                     x,
                     y,
                     obstacle
                 )
             )
 
-
-            # ---------------------------------------------
-            # Track nearest obstacle
-            # ---------------------------------------------
 
             if (
                 clearance
@@ -462,18 +1035,10 @@ class TaskConstraintEvaluator:
                 )
 
 
-            # ---------------------------------------------
-            # Collision
-            # ---------------------------------------------
-
             if inside:
 
                 obstacle_violation = True
 
-
-            # ---------------------------------------------
-            # Safety-margin risk
-            # ---------------------------------------------
 
             elif (
                 clearance
@@ -484,7 +1049,6 @@ class TaskConstraintEvaluator:
                 obstacle_risk = True
 
 
-        # No obstacle configuration.
         if not self.obstacles:
 
             nearest_clearance = float(
@@ -495,7 +1059,7 @@ class TaskConstraintEvaluator:
 
 
         # =================================================
-        # 4. ORIENTATION
+        # ORIENTATION
         # =================================================
 
         orientation_difference = (
@@ -513,10 +1077,6 @@ class TaskConstraintEvaluator:
         )
 
 
-        # ---------------------------------------------
-        # Strong violation
-        # ---------------------------------------------
-
         orientation_violation = (
 
             orientation_error_deg
@@ -527,10 +1087,6 @@ class TaskConstraintEvaluator:
         )
 
 
-        # ---------------------------------------------
-        # Mild risk
-        # ---------------------------------------------
-
         orientation_risk = (
 
             not orientation_violation
@@ -538,13 +1094,15 @@ class TaskConstraintEvaluator:
             and
 
             orientation_error_deg
+
             >
+
             self.orientation_mild_deg
         )
 
 
         # =================================================
-        # 5. COMBINE CONSTRAINTS
+        # COMBINE
         # =================================================
 
         if (
@@ -576,10 +1134,6 @@ class TaskConstraintEvaluator:
             )
 
 
-        # =================================================
-        # TASK VALID SO FAR
-        # =================================================
-
         task_valid_so_far = (
 
             not obstacle_violation
@@ -594,7 +1148,9 @@ class TaskConstraintEvaluator:
         # DOMINANT CONSTRAINT
         # =================================================
 
-        dominant_constraint = "NONE"
+        dominant_constraint = (
+            "NONE"
+        )
 
 
         if obstacle_violation:
@@ -633,7 +1189,7 @@ class TaskConstraintEvaluator:
 
 
         # =================================================
-        # EXPLANATION
+        # REASON
         # =================================================
 
         if obstacle_violation:
@@ -683,10 +1239,6 @@ class TaskConstraintEvaluator:
             )
 
 
-        # =================================================
-        # RETURN
-        # =================================================
-
         return TaskConstraintResult(
 
             state=
@@ -733,6 +1285,414 @@ class TaskConstraintEvaluator:
         )
 
 
+    # =====================================================
+    # SEGMENT EVALUATION
+    # =====================================================
+
+    def evaluate_segment(
+        self,
+        previous_x,
+        previous_y,
+        x,
+        y,
+        orientation_relative_deg,
+        tracking_missing_sec=0.0
+    ):
+        """
+        Evaluate the ENTIRE movement segment:
+
+            previous position
+            ->
+            current position
+
+        This prevents fast motion from skipping
+        obstacle detection between sampled frames.
+
+        Spatial task validity therefore depends on
+        the swept movement segment, not only
+        the current endpoint.
+
+        Orientation is currently evaluated at the
+        current endpoint only.
+        """
+
+        # -------------------------------------------------
+        # First evaluate current endpoint normally.
+        # -------------------------------------------------
+
+        current_result = self.evaluate(
+
+            x=
+                x,
+
+            y=
+                y,
+
+            orientation_relative_deg=
+                orientation_relative_deg,
+
+            tracking_missing_sec=
+                tracking_missing_sec
+        )
+
+
+        # -------------------------------------------------
+        # Tracking unreliable:
+        # do not make geometric judgement.
+        # -------------------------------------------------
+
+        if (
+            current_result.state
+            ==
+            STATE_TRACKING_UNRELIABLE
+        ):
+
+            return current_result
+
+
+        previous_x = float(
+            previous_x
+        )
+
+        previous_y = float(
+            previous_y
+        )
+
+        x = float(
+            x
+        )
+
+        y = float(
+            y
+        )
+
+
+        # =================================================
+        # SEGMENT -> OBSTACLE
+        # =================================================
+
+        segment_obstacle_violation = False
+        segment_obstacle_risk = False
+
+
+        nearest_segment_clearance = float(
+            "inf"
+        )
+
+
+        nearest_segment_obstacle_id = None
+
+
+        for obstacle in self.obstacles:
+
+            intersects = (
+                segment_intersects_rectangle(
+
+                    previous_x,
+                    previous_y,
+
+                    x,
+                    y,
+
+                    obstacle
+                )
+            )
+
+
+            clearance = (
+                segment_to_rectangle_distance(
+
+                    previous_x,
+                    previous_y,
+
+                    x,
+                    y,
+
+                    obstacle
+                )
+            )
+
+
+            if (
+                clearance
+                <
+                nearest_segment_clearance
+            ):
+
+                nearest_segment_clearance = (
+                    clearance
+                )
+
+                nearest_segment_obstacle_id = (
+                    obstacle.get(
+                        "id",
+                        "obstacle"
+                    )
+                )
+
+
+            if intersects:
+
+                segment_obstacle_violation = (
+                    True
+                )
+
+
+            elif (
+                clearance
+                <=
+                self.safety_margin
+            ):
+
+                segment_obstacle_risk = (
+                    True
+                )
+
+
+        # =================================================
+        # COMBINE ENDPOINT + SEGMENT
+        # =================================================
+
+        obstacle_violation = (
+
+            current_result.obstacle_violation
+
+            or
+
+            segment_obstacle_violation
+        )
+
+
+        obstacle_risk = (
+
+            not obstacle_violation
+
+            and
+
+            (
+                current_result.obstacle_risk
+
+                or
+
+                segment_obstacle_risk
+            )
+        )
+
+
+        # Use the most conservative spatial clearance.
+        obstacle_clearance = min(
+
+            current_result.obstacle_clearance,
+
+            nearest_segment_clearance
+        )
+
+
+        if (
+            nearest_segment_clearance
+            <=
+            current_result.obstacle_clearance
+        ):
+
+            nearest_obstacle_id = (
+                nearest_segment_obstacle_id
+            )
+
+
+        else:
+
+            nearest_obstacle_id = (
+                current_result.nearest_obstacle_id
+            )
+
+
+        # =================================================
+        # ORIENTATION
+        # =================================================
+
+        orientation_violation = (
+            current_result.orientation_violation
+        )
+
+
+        orientation_risk = (
+            current_result.orientation_risk
+        )
+
+
+        # =================================================
+        # FINAL STATE
+        # =================================================
+
+        if (
+            obstacle_violation
+
+            or
+
+            orientation_violation
+        ):
+
+            state = (
+                STATE_VIOLATION
+            )
+
+
+        elif (
+            obstacle_risk
+
+            or
+
+            orientation_risk
+        ):
+
+            state = (
+                STATE_RISK
+            )
+
+
+        else:
+
+            state = (
+                STATE_VALID
+            )
+
+
+        task_valid_so_far = (
+
+            not obstacle_violation
+
+            and
+
+            not orientation_violation
+        )
+
+
+        # =================================================
+        # DOMINANT CONSTRAINT
+        # =================================================
+
+        if obstacle_violation:
+
+            dominant_constraint = (
+                "OBSTACLE"
+            )
+
+
+        elif orientation_violation:
+
+            dominant_constraint = (
+                "ORIENTATION"
+            )
+
+
+        elif obstacle_risk:
+
+            dominant_constraint = (
+                "OBSTACLE"
+            )
+
+
+        elif orientation_risk:
+
+            dominant_constraint = (
+                "ORIENTATION"
+            )
+
+
+        elif current_result.goal_reached:
+
+            dominant_constraint = (
+                "GOAL"
+            )
+
+
+        else:
+
+            dominant_constraint = (
+                "NONE"
+            )
+
+
+        # =================================================
+        # REASON
+        # =================================================
+
+        if segment_obstacle_violation:
+
+            reason = (
+                "The movement segment crosses "
+                "the obstacle region."
+            )
+
+
+        elif current_result.obstacle_violation:
+
+            reason = (
+                current_result.reason
+            )
+
+
+        elif segment_obstacle_risk:
+
+            reason = (
+                "The movement segment enters "
+                "the obstacle safety margin."
+            )
+
+
+        else:
+
+            reason = (
+                current_result.reason
+            )
+
+
+        return TaskConstraintResult(
+
+            state=
+                state,
+
+            task_valid_so_far=
+                task_valid_so_far,
+
+            tracking_reliable=
+                current_result.tracking_reliable,
+
+            goal_reached=
+                current_result.goal_reached,
+
+            distance_to_goal=
+                current_result.distance_to_goal,
+
+            obstacle_violation=
+                obstacle_violation,
+
+            obstacle_risk=
+                obstacle_risk,
+
+            obstacle_clearance=
+                obstacle_clearance,
+
+            nearest_obstacle_id=
+                nearest_obstacle_id,
+
+            orientation_violation=
+                orientation_violation,
+
+            orientation_risk=
+                orientation_risk,
+
+            orientation_error_deg=
+                current_result.orientation_error_deg,
+
+            dominant_constraint=
+                dominant_constraint,
+
+            reason=
+                reason
+        )
+
+
 # =========================================================
 # SELF TEST
 # =========================================================
@@ -751,7 +1711,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "AdaptiveSkill - Task Constraint Evaluator"
+        "AdaptiveSkill - Task Constraint Evaluator v2"
     )
 
     print(
@@ -759,233 +1719,328 @@ if __name__ == "__main__":
     )
 
 
-    tests = [
+    # =====================================================
+    # POINT TESTS
+    # =====================================================
 
-        # =================================================
-        # A
-        # =================================================
-
-        (
-            "A. VALID - START AREA",
-
-            {
-                "x": 0.3,
-                "y": -0.8,
-
-                "orientation_relative_deg":
-                    2.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_VALID
-        ),
-
-
-        # =================================================
-        # B
-        #
-        # Upper alternative route.
-        # =================================================
+    point_tests = [
 
         (
-            "B. VALID - UPPER ROUTE",
+            "POINT A - VALID UPPER ROUTE",
 
             {
-                "x": 1.65,
-                "y": -0.9,
+                "x":
+                    1.65,
 
-                "orientation_relative_deg":
-                    3.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_VALID
-        ),
-
-
-        # =================================================
-        # C
-        #
-        # Lower alternative route.
-        # =================================================
-
-        (
-            "C. VALID - LOWER ROUTE",
-
-            {
-                "x": 1.65,
-                "y": 0.9,
-
-                "orientation_relative_deg":
-                    -4.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_VALID
-        ),
-
-
-        # =================================================
-        # D
-        #
-        # Obstacle top boundary = -0.45
-        # Current y = -0.55
-        #
-        # Clearance = 0.10
-        # Safety margin = 0.20
-        # =================================================
-
-        (
-            "D. RISK - NEAR OBSTACLE",
-
-            {
-                "x": 1.65,
-                "y": -0.55,
+                "y":
+                    -0.90,
 
                 "orientation_relative_deg":
                     0.0,
 
                 "tracking_missing_sec":
-                    0.0
+                    0.0,
             },
 
-            STATE_RISK
+            STATE_VALID,
         ),
 
 
-        # =================================================
-        # E
-        # =================================================
-
         (
-            "E. VIOLATION - INSIDE OBSTACLE",
+            "POINT B - VALID LOWER ROUTE",
 
             {
-                "x": 1.65,
-                "y": 0.0,
+                "x":
+                    1.65,
+
+                "y":
+                    0.90,
 
                 "orientation_relative_deg":
                     0.0,
 
                 "tracking_missing_sec":
-                    0.0
+                    0.0,
             },
 
-            STATE_VIOLATION
+            STATE_VALID,
         ),
 
 
-        # =================================================
-        # F
-        #
-        # Mild threshold = 8 deg
-        # Strong threshold = 15 deg
-        # =================================================
-
         (
-            "F. RISK - ORIENTATION",
+            "POINT C - OBSTACLE RISK",
 
             {
-                "x": 0.8,
-                "y": -0.8,
+                "x":
+                    1.65,
 
-                "orientation_relative_deg":
-                    11.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_RISK
-        ),
-
-
-        # =================================================
-        # G
-        # =================================================
-
-        (
-            "G. VIOLATION - ORIENTATION",
-
-            {
-                "x": 0.8,
-                "y": -0.8,
-
-                "orientation_relative_deg":
-                    22.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_VIOLATION
-        ),
-
-
-        # =================================================
-        # H
-        # =================================================
-
-        (
-            "H. VALID - GOAL REACHED",
-
-            {
-                "x": 3.15,
-                "y": 0.05,
-
-                "orientation_relative_deg":
-                    2.0,
-
-                "tracking_missing_sec":
-                    0.0
-            },
-
-            STATE_VALID
-        ),
-
-
-        # =================================================
-        # I
-        #
-        # max_missing_sec = 0.30
-        # =================================================
-
-        (
-            "I. TRACKING UNRELIABLE",
-
-            {
-                "x": 1.0,
-                "y": -0.8,
+                "y":
+                    0.55,
 
                 "orientation_relative_deg":
                     0.0,
 
                 "tracking_missing_sec":
-                    0.5
+                    0.0,
             },
 
-            STATE_TRACKING_UNRELIABLE
-        )
+            STATE_RISK,
+        ),
+
+
+        (
+            "POINT D - OBSTACLE VIOLATION",
+
+            {
+                "x":
+                    1.65,
+
+                "y":
+                    0.0,
+
+                "orientation_relative_deg":
+                    0.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_VIOLATION,
+        ),
+
+
+        (
+            "POINT E - ORIENTATION RISK",
+
+            {
+                "x":
+                    0.70,
+
+                "y":
+                    -0.75,
+
+                "orientation_relative_deg":
+                    12.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_RISK,
+        ),
+
+
+        (
+            "POINT F - ORIENTATION VIOLATION",
+
+            {
+                "x":
+                    0.70,
+
+                "y":
+                    -0.75,
+
+                "orientation_relative_deg":
+                    20.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_VIOLATION,
+        ),
+    ]
+
+
+    # =====================================================
+    # SEGMENT TESTS
+    # =====================================================
+
+    segment_tests = [
+
+        # -------------------------------------------------
+        # Both endpoints valid,
+        # segment passes through obstacle.
+        # -------------------------------------------------
+
+        (
+            "SEGMENT A - FAST CROSS THROUGH OBSTACLE",
+
+            {
+                "previous_x":
+                    0.90,
+
+                "previous_y":
+                    -0.90,
+
+                "x":
+                    2.40,
+
+                "y":
+                    0.90,
+
+                "orientation_relative_deg":
+                    0.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_VIOLATION,
+        ),
+
+
+        # -------------------------------------------------
+        # Both endpoints valid,
+        # segment passes close enough to enter
+        # safety margin but does not touch obstacle.
+        # -------------------------------------------------
+
+        (
+            "SEGMENT B - PASSES THROUGH SAFETY MARGIN",
+
+            {
+                "previous_x":
+                    0.90,
+
+                "previous_y":
+                    0.60,
+
+                "x":
+                    2.40,
+
+                "y":
+                    0.60,
+
+                "orientation_relative_deg":
+                    0.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_RISK,
+        ),
+
+
+        # -------------------------------------------------
+        # Safe lower route.
+        # -------------------------------------------------
+
+        (
+            "SEGMENT C - SAFE LOWER ROUTE",
+
+            {
+                "previous_x":
+                    0.90,
+
+                "previous_y":
+                    0.90,
+
+                "x":
+                    2.40,
+
+                "y":
+                    0.90,
+
+                "orientation_relative_deg":
+                    0.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_VALID,
+        ),
+
+
+        # -------------------------------------------------
+        # Safe upper route.
+        # -------------------------------------------------
+
+        (
+            "SEGMENT D - SAFE UPPER ROUTE",
+
+            {
+                "previous_x":
+                    0.90,
+
+                "previous_y":
+                    -0.90,
+
+                "x":
+                    2.40,
+
+                "y":
+                    -0.90,
+
+                "orientation_relative_deg":
+                    0.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_VALID,
+        ),
+
+
+        # -------------------------------------------------
+        # Endpoint orientation can still trigger
+        # task risk independently of path.
+        # -------------------------------------------------
+
+        (
+            "SEGMENT E - SAFE PATH BUT ORIENTATION RISK",
+
+            {
+                "previous_x":
+                    0.20,
+
+                "previous_y":
+                    -1.00,
+
+                "x":
+                    0.70,
+
+                "y":
+                    -0.75,
+
+                "orientation_relative_deg":
+                    12.0,
+
+                "tracking_missing_sec":
+                    0.0,
+            },
+
+            STATE_RISK,
+        ),
     ]
 
 
     passed = 0
 
+    total = (
+        len(point_tests)
+        +
+        len(segment_tests)
+    )
+
+
+    # =====================================================
+    # RUN POINT TESTS
+    # =====================================================
 
     for (
         name,
         kwargs,
-        expected
-    ) in tests:
+        expected,
+    ) in point_tests:
 
-        result = evaluator.evaluate(
-            **kwargs
+        result = (
+            evaluator.evaluate(
+                **kwargs
+            )
         )
 
 
@@ -997,7 +2052,6 @@ if __name__ == "__main__":
 
 
         if ok:
-
             passed += 1
 
 
@@ -1008,7 +2062,7 @@ if __name__ == "__main__":
         )
 
         print(
-            "-" * 50
+            "-" * 54
         )
 
         print(
@@ -1022,18 +2076,75 @@ if __name__ == "__main__":
         )
 
         print(
+            "Obstacle clearance:",
+            round(
+                result.obstacle_clearance,
+                3
+            )
+        )
+
+        print(
+            "Reason:",
+            result.reason
+        )
+
+        print(
             "PASS:",
             ok
         )
 
+
+    # =====================================================
+    # RUN SEGMENT TESTS
+    # =====================================================
+
+    for (
+        name,
+        kwargs,
+        expected,
+    ) in segment_tests:
+
+        result = (
+            evaluator.evaluate_segment(
+                **kwargs
+            )
+        )
+
+
+        ok = (
+            result.state
+            ==
+            expected
+        )
+
+
+        if ok:
+            passed += 1
+
+
+        print()
+
         print(
-            "Task valid so far:",
-            result.task_valid_so_far
+            name
         )
 
         print(
-            "Goal reached:",
-            result.goal_reached
+            "-" * 54
+        )
+
+        print(
+            "Expected:",
+            expected
+        )
+
+        print(
+            "Actual:",
+            result.state
+        )
+
+        print(
+            "Obstacle violation:",
+            result.obstacle_violation
         )
 
         print(
@@ -1042,57 +2153,11 @@ if __name__ == "__main__":
         )
 
         print(
-            "Obstacle violation:",
-            result.obstacle_violation
-        )
-
-
-        if math.isfinite(
-            result.obstacle_clearance
-        ):
-
-            clearance_text = round(
+            "Segment clearance:",
+            round(
                 result.obstacle_clearance,
                 3
             )
-
-        else:
-
-            clearance_text = (
-                result.obstacle_clearance
-            )
-
-
-        print(
-            "Obstacle clearance:",
-            clearance_text
-        )
-
-
-        if math.isfinite(
-            result.orientation_error_deg
-        ):
-
-            orientation_text = round(
-                result.orientation_error_deg,
-                2
-            )
-
-        else:
-
-            orientation_text = (
-                result.orientation_error_deg
-            )
-
-
-        print(
-            "Orientation error:",
-            orientation_text
-        )
-
-        print(
-            "Dominant constraint:",
-            result.dominant_constraint
         )
 
         print(
@@ -1100,6 +2165,15 @@ if __name__ == "__main__":
             result.reason
         )
 
+        print(
+            "PASS:",
+            ok
+        )
+
+
+    # =====================================================
+    # FINAL
+    # =====================================================
 
     print()
 
@@ -1109,24 +2183,20 @@ if __name__ == "__main__":
 
     print(
         "RESULT:",
-        f"{passed}/{len(tests)} tests passed"
+        f"{passed}/{total} tests passed"
     )
 
 
-    if (
-        passed
-        ==
-        len(tests)
-    ):
+    if passed == total:
 
         print(
-            "TASK CONSTRAINT EVALUATOR: PASSED"
+            "SEGMENT-AWARE TASK CONSTRAINTS: PASSED"
         )
 
     else:
 
         print(
-            "TASK CONSTRAINT EVALUATOR: FAILED"
+            "SEGMENT-AWARE TASK CONSTRAINTS: FAILED"
         )
 
 

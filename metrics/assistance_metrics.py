@@ -1,4 +1,3 @@
-import math
 import sys
 import time
 from dataclasses import dataclass, asdict
@@ -38,6 +37,23 @@ from interaction.intervention_comparator import (
 
 
 # =========================================================
+# TASK OUTCOME LABELS
+# =========================================================
+
+OUTCOME_IN_PROGRESS = "IN_PROGRESS"
+
+OUTCOME_TASK_SUCCESS = "TASK_SUCCESS"
+
+OUTCOME_GOAL_WITH_VIOLATION = (
+    "GOAL_REACHED_WITH_VIOLATION"
+)
+
+OUTCOME_VIOLATION_OCCURRED = (
+    "VIOLATION_OCCURRED"
+)
+
+
+# =========================================================
 # SUMMARY
 # =========================================================
 
@@ -47,20 +63,23 @@ class TrialInterventionSummary:
     Episode-level summary for one demonstration trial.
 
     IMPORTANT:
-    Counts refer to contiguous intervention EPISODES,
-    not frames.
 
-    Example:
+    Counts are contiguous EPISODES,
+    not video / UI frames.
 
-        INTERVENE
-        INTERVENE
-        INTERVENE
-        STAY_QUIET
+    The summary also keeps sticky task-history state:
 
-    counts as ONE intervention episode.
+        constraint violation occurred
+
+    Once a violation has happened,
+    returning to a valid state does NOT erase it.
     """
 
     trial_duration_sec: float
+
+    # -----------------------------------------------------
+    # Intervention episodes
+    # -----------------------------------------------------
 
     reference_intervention_episodes: int
     task_intervention_episodes: int
@@ -69,14 +88,39 @@ class TrialInterventionSummary:
     task_risk_missed_by_reference_episodes: int
     task_relevant_intervention_episodes: int
 
+    # -----------------------------------------------------
+    # Alternative strategies
+    # -----------------------------------------------------
+
     alternative_valid_episodes: int
     alternative_valid_route_preserved: bool
+
+    # -----------------------------------------------------
+    # Task constraint history
+    # -----------------------------------------------------
+
+    constraint_risk_episodes: int
+    constraint_violation_episodes: int
+
+    constraint_risk_occurred: bool
+    constraint_violation_occurred: bool
+
+    # -----------------------------------------------------
+    # Time
+    # -----------------------------------------------------
 
     time_reference_intervention_sec: float
     time_task_intervention_sec: float
 
     time_unnecessary_intervention_sec: float
     time_task_risk_missed_by_reference_sec: float
+
+    time_in_risk_sec: float
+    time_in_violation_sec: float
+
+    # -----------------------------------------------------
+    # Trial observations
+    # -----------------------------------------------------
 
     max_reference_distance: float
 
@@ -86,6 +130,8 @@ class TrialInterventionSummary:
 
     current_reference_decision: str
     current_task_decision: str
+
+    task_outcome: str
 
 
     def to_dict(self):
@@ -98,27 +144,30 @@ class TrialInterventionSummary:
 
 class AssistanceMetrics:
     """
-    Tracks intervention behaviour across an entire trial.
+    Episode-level trial metrics.
 
-    The main purpose is to avoid a misleading
-    frame-by-frame interpretation.
+    Main research purpose:
 
-    It records:
+    Distinguish:
 
-        - intervention EPISODES
-        - disagreement episodes
-        - intervention time
-        - alternative-valid episodes
-        - whether the task-aware policy returned to quiet
+        reference deviation
 
-    It does NOT claim:
+    from:
+
+        task-relevant intervention need
+
+    while also preserving whether a real task
+    constraint violation happened anywhere
+    during the demonstration.
+
+    This prototype does NOT claim:
 
         - improved learning
-        - reduced workload
-        - better user experience
-        - validated intervention superiority
+        - lower workload
+        - improved user experience
+        - validated assistance superiority
 
-    Those require a future user study.
+    Those would require a user study.
     """
 
 
@@ -131,9 +180,6 @@ class AssistanceMetrics:
     # =====================================================
 
     def reset(self):
-        """
-        Clear all trial-level state.
-        """
 
         self.started = False
 
@@ -141,11 +187,12 @@ class AssistanceMetrics:
         self.last_timestamp = None
 
 
-        # -------------------------------------------------
-        # Episode counts
-        # -------------------------------------------------
+        # =================================================
+        # INTERVENTION EPISODES
+        # =================================================
 
         self.reference_intervention_episodes = 0
+
         self.task_intervention_episodes = 0
 
         self.unnecessary_intervention_episodes_avoided = 0
@@ -154,12 +201,31 @@ class AssistanceMetrics:
 
         self.task_relevant_intervention_episodes = 0
 
+
+        # =================================================
+        # ALTERNATIVE VALID STRATEGY
+        # =================================================
+
         self.alternative_valid_episodes = 0
 
 
-        # -------------------------------------------------
-        # Durations
-        # -------------------------------------------------
+        # =================================================
+        # TASK CONSTRAINT HISTORY
+        # =================================================
+
+        self.constraint_risk_episodes = 0
+
+        self.constraint_violation_episodes = 0
+
+
+        self.constraint_risk_occurred = False
+
+        self.constraint_violation_occurred = False
+
+
+        # =================================================
+        # TIME
+        # =================================================
 
         self.time_reference_intervention_sec = 0.0
 
@@ -169,10 +235,14 @@ class AssistanceMetrics:
 
         self.time_task_risk_missed_by_reference_sec = 0.0
 
+        self.time_in_risk_sec = 0.0
 
-        # -------------------------------------------------
-        # Trial observations
-        # -------------------------------------------------
+        self.time_in_violation_sec = 0.0
+
+
+        # =================================================
+        # OBSERVATIONS
+        # =================================================
 
         self.max_reference_distance = 0.0
 
@@ -181,14 +251,9 @@ class AssistanceMetrics:
         self.ever_task_intervened = False
 
 
-        # -------------------------------------------------
-        # Previous active states
-        #
-        # Used for edge detection:
-        #
-        # False -> True
-        # means a NEW episode.
-        # -------------------------------------------------
+        # =================================================
+        # PREVIOUS EPISODE FLAGS
+        # =================================================
 
         self.previous_reference_intervention = False
 
@@ -202,10 +267,14 @@ class AssistanceMetrics:
 
         self.previous_alternative_valid = False
 
+        self.previous_constraint_risk = False
 
-        # -------------------------------------------------
-        # Current active states
-        # -------------------------------------------------
+        self.previous_constraint_violation = False
+
+
+        # =================================================
+        # CURRENT ACTIVE FLAGS
+        # =================================================
 
         self.current_reference_intervention = False
 
@@ -219,10 +288,14 @@ class AssistanceMetrics:
 
         self.current_alternative_valid = False
 
+        self.current_constraint_risk = False
 
-        # -------------------------------------------------
-        # Current decisions
-        # -------------------------------------------------
+        self.current_constraint_violation = False
+
+
+        # =================================================
+        # CURRENT DECISIONS
+        # =================================================
 
         self.current_reference_decision = (
             DECISION_PAUSE
@@ -234,7 +307,7 @@ class AssistanceMetrics:
 
 
     # =====================================================
-    # TIME
+    # TIME HELPER
     # =====================================================
 
     def _get_timestamp(
@@ -243,6 +316,7 @@ class AssistanceMetrics:
     ):
 
         if timestamp_sec is None:
+
             return time.perf_counter()
 
         return float(
@@ -250,16 +324,17 @@ class AssistanceMetrics:
         )
 
 
+    # =====================================================
+    # ACCUMULATE DURATION
+    # =====================================================
+
     def _accumulate_previous_duration(
         self,
         timestamp_sec
     ):
-        """
-        Attribute elapsed time to the state that was
-        active during the PREVIOUS interval.
-        """
 
         if self.last_timestamp is None:
+
             return
 
 
@@ -271,6 +346,7 @@ class AssistanceMetrics:
 
 
         if dt <= 0.0:
+
             return
 
 
@@ -301,6 +377,16 @@ class AssistanceMetrics:
             self.time_task_risk_missed_by_reference_sec += dt
 
 
+        if self.current_constraint_risk:
+
+            self.time_in_risk_sec += dt
+
+
+        if self.current_constraint_violation:
+
+            self.time_in_violation_sec += dt
+
+
     # =====================================================
     # UPDATE
     # =====================================================
@@ -311,12 +397,6 @@ class AssistanceMetrics:
         task_result,
         timestamp_sec=None
     ):
-        """
-        Add one current frame / system decision.
-
-        Episode counts increase only when a condition
-        changes from inactive -> active.
-        """
 
         timestamp_sec = self._get_timestamp(
             timestamp_sec
@@ -324,7 +404,7 @@ class AssistanceMetrics:
 
 
         # =================================================
-        # START TRIAL CLOCK
+        # START CLOCK
         # =================================================
 
         if not self.started:
@@ -370,7 +450,7 @@ class AssistanceMetrics:
 
 
         # =================================================
-        # ACTIVE CONDITIONS
+        # INTERVENTION STATES
         # =================================================
 
         reference_intervention = (
@@ -389,11 +469,6 @@ class AssistanceMetrics:
         )
 
 
-        # -------------------------------------------------
-        # Reference wants correction,
-        # task-aware system says stay quiet.
-        # -------------------------------------------------
-
         unnecessary_intervention = (
 
             reference_decision
@@ -407,11 +482,6 @@ class AssistanceMetrics:
             DECISION_STAY_QUIET
         )
 
-
-        # -------------------------------------------------
-        # Reference stays quiet,
-        # but task-aware policy sees real task risk.
-        # -------------------------------------------------
 
         task_risk_missed = (
 
@@ -435,10 +505,6 @@ class AssistanceMetrics:
         )
 
 
-        # -------------------------------------------------
-        # Any task-relevant intervention.
-        # -------------------------------------------------
-
         task_relevant_intervention = (
 
             task_decision
@@ -455,14 +521,9 @@ class AssistanceMetrics:
         )
 
 
-        # -------------------------------------------------
-        # Alternative-valid episode.
-        #
-        # Far enough from expert prior that the internal
-        # reference baseline wants intervention,
-        #
-        # but the task remains VALID.
-        # -------------------------------------------------
+        # =================================================
+        # ALTERNATIVE VALID
+        # =================================================
 
         alternative_valid = (
 
@@ -481,7 +542,27 @@ class AssistanceMetrics:
 
 
         # =================================================
-        # EDGE DETECTION -> EPISODE COUNTS
+        # TASK CONSTRAINT STATES
+        # =================================================
+
+        constraint_risk = (
+
+            task_result.state
+            ==
+            STATE_RISK
+        )
+
+
+        constraint_violation = (
+
+            task_result.state
+            ==
+            STATE_VIOLATION
+        )
+
+
+        # =================================================
+        # EPISODE EDGE DETECTION
         # =================================================
 
         if (
@@ -550,20 +631,40 @@ class AssistanceMetrics:
             self.alternative_valid_episodes += 1
 
 
-        # =================================================
-        # OTHER TRIAL OBSERVATIONS
-        # =================================================
+        if (
+            constraint_risk
 
-        if math.isfinite(
-            comparison.reference_distance
+            and
+
+            not self.previous_constraint_risk
         ):
 
-            self.max_reference_distance = max(
-                self.max_reference_distance,
-                float(
-                    comparison.reference_distance
-                )
-            )
+            self.constraint_risk_episodes += 1
+
+
+        if (
+            constraint_violation
+
+            and
+
+            not self.previous_constraint_violation
+        ):
+
+            self.constraint_violation_episodes += 1
+
+
+        # =================================================
+        # STICKY HISTORY
+        # =================================================
+
+        if constraint_risk:
+
+            self.constraint_risk_occurred = True
+
+
+        if constraint_violation:
+
+            self.constraint_violation_occurred = True
 
 
         if task_result.goal_reached:
@@ -577,7 +678,32 @@ class AssistanceMetrics:
 
 
         # =================================================
-        # SAVE CURRENT ACTIVE STATES
+        # MAX REFERENCE DISTANCE
+        # =================================================
+
+        try:
+
+            reference_distance = float(
+                comparison.reference_distance
+            )
+
+
+            if reference_distance >= 0.0:
+
+                self.max_reference_distance = max(
+
+                    self.max_reference_distance,
+
+                    reference_distance
+                )
+
+        except Exception:
+
+            pass
+
+
+        # =================================================
+        # SAVE CURRENT STATES
         # =================================================
 
         self.current_reference_intervention = (
@@ -604,9 +730,17 @@ class AssistanceMetrics:
             alternative_valid
         )
 
+        self.current_constraint_risk = (
+            constraint_risk
+        )
+
+        self.current_constraint_violation = (
+            constraint_violation
+        )
+
 
         # =================================================
-        # PREVIOUS FLAGS FOR NEXT EDGE
+        # PREVIOUS FLAGS
         # =================================================
 
         self.previous_reference_intervention = (
@@ -633,6 +767,14 @@ class AssistanceMetrics:
             alternative_valid
         )
 
+        self.previous_constraint_risk = (
+            constraint_risk
+        )
+
+        self.previous_constraint_violation = (
+            constraint_violation
+        )
+
 
         self.last_timestamp = (
             timestamp_sec
@@ -647,15 +789,9 @@ class AssistanceMetrics:
         self,
         timestamp_sec=None
     ):
-        """
-        Update durations even when no new state transition
-        has occurred.
-
-        Useful immediately before displaying or saving
-        the trial summary.
-        """
 
         if not self.started:
+
             return
 
 
@@ -671,6 +807,63 @@ class AssistanceMetrics:
 
         self.last_timestamp = (
             timestamp_sec
+        )
+
+
+    # =====================================================
+    # TASK OUTCOME
+    # =====================================================
+
+    def _get_task_outcome(self):
+
+        # -------------------------------------------------
+        # Goal reached, no violation:
+        # genuine task success.
+        # -------------------------------------------------
+
+        if (
+            self.goal_reached_seen
+
+            and
+
+            not self.constraint_violation_occurred
+        ):
+
+            return (
+                OUTCOME_TASK_SUCCESS
+            )
+
+
+        # -------------------------------------------------
+        # Goal reached, but violation happened earlier.
+        # -------------------------------------------------
+
+        if (
+            self.goal_reached_seen
+
+            and
+
+            self.constraint_violation_occurred
+        ):
+
+            return (
+                OUTCOME_GOAL_WITH_VIOLATION
+            )
+
+
+        # -------------------------------------------------
+        # Violation happened but goal not reached.
+        # -------------------------------------------------
+
+        if self.constraint_violation_occurred:
+
+            return (
+                OUTCOME_VIOLATION_OCCURRED
+            )
+
+
+        return (
+            OUTCOME_IN_PROGRESS
         )
 
 
@@ -692,9 +885,13 @@ class AssistanceMetrics:
 
         if (
             not self.started
+
             or
+
             self.start_timestamp is None
+
             or
+
             self.last_timestamp is None
         ):
 
@@ -711,13 +908,6 @@ class AssistanceMetrics:
             )
 
 
-        # -------------------------------------------------
-        # Returned to quiet:
-        #
-        # task-aware policy intervened at least once,
-        # and is currently quiet again.
-        # -------------------------------------------------
-
         returned_to_quiet = (
 
             self.ever_task_intervened
@@ -727,6 +917,11 @@ class AssistanceMetrics:
             self.current_task_decision
             ==
             DECISION_STAY_QUIET
+        )
+
+
+        task_outcome = (
+            self._get_task_outcome()
         )
 
 
@@ -760,6 +955,18 @@ class AssistanceMetrics:
                     0
                 ),
 
+            constraint_risk_episodes=
+                self.constraint_risk_episodes,
+
+            constraint_violation_episodes=
+                self.constraint_violation_episodes,
+
+            constraint_risk_occurred=
+                self.constraint_risk_occurred,
+
+            constraint_violation_occurred=
+                self.constraint_violation_occurred,
+
             time_reference_intervention_sec=
                 self.time_reference_intervention_sec,
 
@@ -771,6 +978,12 @@ class AssistanceMetrics:
 
             time_task_risk_missed_by_reference_sec=
                 self.time_task_risk_missed_by_reference_sec,
+
+            time_in_risk_sec=
+                self.time_in_risk_sec,
+
+            time_in_violation_sec=
+                self.time_in_violation_sec,
 
             max_reference_distance=
                 self.max_reference_distance,
@@ -786,6 +999,9 @@ class AssistanceMetrics:
 
             current_task_decision=
                 self.current_task_decision,
+
+            task_outcome=
+                task_outcome,
         )
 
 
@@ -799,10 +1015,6 @@ if __name__ == "__main__":
         TaskConstraintEvaluator()
     )
 
-
-    # =====================================================
-    # UPPER EXPERT PRIOR
-    # =====================================================
 
     expert_reference = [
 
@@ -840,6 +1052,7 @@ if __name__ == "__main__":
 
     comparator = (
         InterventionComparator(
+
             expert_reference_points=
                 expert_reference,
 
@@ -849,185 +1062,62 @@ if __name__ == "__main__":
     )
 
 
-    metrics = (
+    # =====================================================
+    # TEST 1
+    # SAFE ALTERNATIVE ROUTE
+    # =====================================================
+
+    safe_metrics = (
         AssistanceMetrics()
     )
 
 
-    # =====================================================
-    # TEST SEQUENCE
-    #
-    # We intentionally repeat several frames inside
-    # the same condition.
-    #
-    # Episode counts MUST NOT increase every frame.
-    # =====================================================
-
-    sequence = [
-
-        # -------------------------------------------------
-        # Normal / agreement
-        # -------------------------------------------------
+    safe_sequence = [
 
         (
             0.0,
-            0.70,
-            -0.75,
+            0.0,
             0.0,
         ),
-
-
-        # -------------------------------------------------
-        # Alternative valid route episode 1
-        #
-        # Repeated three frames.
-        #
-        # Must count as ONE episode.
-        # -------------------------------------------------
 
         (
             0.1,
             1.65,
             0.90,
-            0.0,
         ),
 
         (
             0.2,
-            1.65,
+            2.40,
             0.90,
-            0.0,
         ),
 
         (
             0.3,
-            1.65,
-            0.90,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Back to agreement
-        # -------------------------------------------------
-
-        (
-            0.4,
-            0.70,
-            -0.75,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Alternative valid route episode 2
-        # -------------------------------------------------
-
-        (
-            0.5,
-            1.65,
-            0.90,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Back to agreement
-        # -------------------------------------------------
-
-        (
-            0.6,
-            0.70,
-            -0.75,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Orientation risk
-        #
-        # Reference stays quiet.
-        # Task-aware intervenes.
-        #
-        # Repeated two frames.
-        #
-        # Must count as ONE missed-risk episode.
-        # -------------------------------------------------
-
-        (
-            0.7,
-            0.70,
-            -0.75,
-            12.0,
-        ),
-
-        (
-            0.8,
-            0.70,
-            -0.75,
-            12.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Recover orientation
-        # -------------------------------------------------
-
-        (
-            0.9,
-            0.70,
-            -0.75,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Obstacle risk
-        #
-        # Both policies intervene.
-        # -------------------------------------------------
-
-        (
-            1.0,
-            1.65,
-            -0.55,
-            0.0,
-        ),
-
-        (
-            1.1,
-            1.65,
-            -0.55,
-            0.0,
-        ),
-
-
-        # -------------------------------------------------
-        # Recover
-        # -------------------------------------------------
-
-        (
-            1.2,
-            0.70,
-            -0.75,
+            3.20,
             0.0,
         ),
     ]
 
 
     for (
-        timestamp_sec,
+        timestamp,
         x,
         y,
-        orientation_deg,
-    ) in sequence:
+    ) in safe_sequence:
 
         task_result = (
             evaluator.evaluate(
-                x=x,
-                y=y,
+
+                x=
+                    x,
+
+                y=
+                    y,
+
                 orientation_relative_deg=
-                    orientation_deg,
+                    0.0,
+
                 tracking_missing_sec=
                     0.0,
             )
@@ -1036,15 +1126,21 @@ if __name__ == "__main__":
 
         comparison = (
             comparator.compare(
-                x=x,
-                y=y,
+
+                x=
+                    x,
+
+                y=
+                    y,
+
                 task_result=
                     task_result,
             )
         )
 
 
-        metrics.update(
+        safe_metrics.update(
+
             comparison=
                 comparison,
 
@@ -1052,14 +1148,116 @@ if __name__ == "__main__":
                 task_result,
 
             timestamp_sec=
-                timestamp_sec,
+                timestamp,
         )
 
 
-    summary = (
-        metrics.get_summary(
+    safe_summary = (
+        safe_metrics.get_summary(
             timestamp_sec=
-                1.3
+                0.4
+        )
+    )
+
+
+    # =====================================================
+    # TEST 2
+    # VIOLATION THEN RECOVERY + GOAL
+    # =====================================================
+
+    violation_metrics = (
+        AssistanceMetrics()
+    )
+
+
+    violation_sequence = [
+
+        # Valid start.
+        (
+            0.0,
+            0.0,
+            0.0,
+        ),
+
+        # Actual obstacle violation.
+        (
+            0.1,
+            1.65,
+            0.0,
+        ),
+
+        # Recover to safe lower route.
+        (
+            0.2,
+            2.40,
+            0.90,
+        ),
+
+        # Reach target.
+        (
+            0.3,
+            3.20,
+            0.0,
+        ),
+    ]
+
+
+    for (
+        timestamp,
+        x,
+        y,
+    ) in violation_sequence:
+
+        task_result = (
+            evaluator.evaluate(
+
+                x=
+                    x,
+
+                y=
+                    y,
+
+                orientation_relative_deg=
+                    0.0,
+
+                tracking_missing_sec=
+                    0.0,
+            )
+        )
+
+
+        comparison = (
+            comparator.compare(
+
+                x=
+                    x,
+
+                y=
+                    y,
+
+                task_result=
+                    task_result,
+            )
+        )
+
+
+        violation_metrics.update(
+
+            comparison=
+                comparison,
+
+            task_result=
+                task_result,
+
+            timestamp_sec=
+                timestamp,
+        )
+
+
+    violation_summary = (
+        violation_metrics.get_summary(
+            timestamp_sec=
+                0.4
         )
     )
 
@@ -1071,212 +1269,182 @@ if __name__ == "__main__":
     print()
 
     print(
-        "======================================================"
+        "========================================================"
     )
 
     print(
-        "AdaptiveSkill - Episode-Level Assistance Metrics"
+        "AdaptiveSkill - Persistent Trial Outcome Metrics"
     )
 
     print(
-        "======================================================"
+        "========================================================"
     )
+
 
     print()
 
     print(
-        "Reference intervention episodes:",
-        summary.reference_intervention_episodes
+        "SAFE ALTERNATIVE ROUTE"
     )
 
     print(
-        "Task-aware intervention episodes:",
-        summary.task_intervention_episodes
+        "-" * 56
     )
+
+    print(
+        "Goal reached:",
+        safe_summary.goal_reached_seen
+    )
+
+    print(
+        "Violation occurred:",
+        safe_summary.constraint_violation_occurred
+    )
+
+    print(
+        "Violation episodes:",
+        safe_summary.constraint_violation_episodes
+    )
+
+    print(
+        "Alternative-valid preserved:",
+        safe_summary.alternative_valid_route_preserved
+    )
+
+    print(
+        "Outcome:",
+        safe_summary.task_outcome
+    )
+
+
+    safe_pass = (
+
+        safe_summary.goal_reached_seen
+
+        and
+
+        not safe_summary.constraint_violation_occurred
+
+        and
+
+        safe_summary.task_outcome
+        ==
+        OUTCOME_TASK_SUCCESS
+    )
+
+
+    print(
+        "PASS:",
+        safe_pass
+    )
+
 
     print()
 
     print(
-        "Unnecessary intervention episodes avoided:",
-        summary.unnecessary_intervention_episodes_avoided
+        "VIOLATION THEN RECOVERY + GOAL"
     )
 
     print(
-        "Task-risk episodes missed by reference:",
-        summary.task_risk_missed_by_reference_episodes
+        "-" * 56
     )
 
     print(
-        "Task-relevant intervention episodes:",
-        summary.task_relevant_intervention_episodes
-    )
-
-    print()
-
-    print(
-        "Alternative-valid episodes:",
-        summary.alternative_valid_episodes
+        "Goal reached:",
+        violation_summary.goal_reached_seen
     )
 
     print(
-        "Alternative-valid route preserved:",
-        summary.alternative_valid_route_preserved
-    )
-
-    print()
-
-    print(
-        "Reference intervention time:",
-        round(
-            summary.time_reference_intervention_sec,
-            3
-        )
+        "Violation occurred:",
+        violation_summary.constraint_violation_occurred
     )
 
     print(
-        "Task-aware intervention time:",
-        round(
-            summary.time_task_intervention_sec,
-            3
-        )
+        "Violation episodes:",
+        violation_summary.constraint_violation_episodes
     )
 
-    print()
-
     print(
-        "Max reference distance:",
-        round(
-            summary.max_reference_distance,
-            3
-        )
+        "Current task decision:",
+        violation_summary.current_task_decision
     )
 
     print(
         "Returned to quiet:",
-        summary.returned_to_quiet
+        violation_summary.returned_to_quiet
+    )
+
+    print(
+        "Outcome:",
+        violation_summary.task_outcome
     )
 
 
-    # =====================================================
-    # EXPECTED
-    # =====================================================
+    violation_pass = (
 
-    expected = {
+        violation_summary.goal_reached_seen
 
-        "reference_intervention_episodes":
-            3,
+        and
 
-        "task_intervention_episodes":
-            2,
+        violation_summary.constraint_violation_occurred
 
-        "unnecessary_intervention_episodes_avoided":
-            2,
+        and
 
-        "task_risk_missed_by_reference_episodes":
-            1,
-
-        "task_relevant_intervention_episodes":
-            2,
-
-        "alternative_valid_episodes":
-            2,
-
-        "alternative_valid_route_preserved":
-            True,
-
-        "returned_to_quiet":
-            True,
-    }
-
-
-    actual = {
-
-        "reference_intervention_episodes":
-            summary.reference_intervention_episodes,
-
-        "task_intervention_episodes":
-            summary.task_intervention_episodes,
-
-        "unnecessary_intervention_episodes_avoided":
-            summary.unnecessary_intervention_episodes_avoided,
-
-        "task_risk_missed_by_reference_episodes":
-            summary.task_risk_missed_by_reference_episodes,
-
-        "task_relevant_intervention_episodes":
-            summary.task_relevant_intervention_episodes,
-
-        "alternative_valid_episodes":
-            summary.alternative_valid_episodes,
-
-        "alternative_valid_route_preserved":
-            summary.alternative_valid_route_preserved,
-
-        "returned_to_quiet":
-            summary.returned_to_quiet,
-    }
-
-
-    passed = (
-        actual
+        violation_summary.constraint_violation_episodes
         ==
-        expected
+        1
+
+        and
+
+        violation_summary.task_outcome
+        ==
+        OUTCOME_GOAL_WITH_VIOLATION
     )
 
-
-    print()
-
-    print(
-        "======================================================"
-    )
-
-    print(
-        "EXPECTED:"
-    )
-
-    for key, value in expected.items():
-
-        print(
-            f"  {key}: {value}"
-        )
-
-
-    print()
-
-    print(
-        "ACTUAL:"
-    )
-
-    for key, value in actual.items():
-
-        print(
-            f"  {key}: {value}"
-        )
-
-
-    print()
 
     print(
         "PASS:",
-        passed
+        violation_pass
     )
 
 
-    if passed:
+    final_pass = (
+
+        safe_pass
+
+        and
+
+        violation_pass
+    )
+
+
+    print()
+
+    print(
+        "========================================================"
+    )
+
+    print(
+        "PASS:",
+        final_pass
+    )
+
+
+    if final_pass:
 
         print(
-            "EPISODE-LEVEL METRICS: PASSED"
+            "PERSISTENT TRIAL OUTCOME METRICS: PASSED"
         )
 
     else:
 
         print(
-            "EPISODE-LEVEL METRICS: FAILED"
+            "PERSISTENT TRIAL OUTCOME METRICS: FAILED"
         )
 
 
     print(
-        "======================================================"
+        "========================================================"
     )
 
     print()
