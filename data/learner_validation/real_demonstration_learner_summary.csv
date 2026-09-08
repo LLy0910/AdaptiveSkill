@@ -1,0 +1,4 @@
+condition,goal_reached,risk_seen,violation_seen,segment_violation_seen,min_obstacle_clearance,max_orientation_error_deg,task_valid,strict_safe
+UPPER_PROTOTYPE,True,False,False,False,0.4492,0.0,True,True
+LOWER_PROTOTYPE,True,False,False,False,0.5472,0.0,True,True
+NAIVE_SINGLE_MEAN,True,True,True,True,0.0,0.0,False,False

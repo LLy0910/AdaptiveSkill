@@ -1,0 +1,56 @@
+{
+    "study_type": "real-human-demonstration engineering sanity check",
+    "claim_boundary": "This evaluates simple learned trajectory prototypes in the virtual task. It is not a user study, physical robot experiment, or evidence of general robot-policy learning.",
+    "required_demonstrations_per_strategy": 3,
+    "selected_demonstrations": {
+        "UPPER": [
+            "SAFE_ALTERNATIVE_20260907_220829_452075",
+            "SAFE_ALTERNATIVE_20260907_220840_552576",
+            "SAFE_ALTERNATIVE_20260907_220846_644579"
+        ],
+        "LOWER": [
+            "SAFE_ALTERNATIVE_20260907_162223_762693",
+            "SAFE_ALTERNATIVE_20260907_220852_315762",
+            "SAFE_ALTERNATIVE_20260907_220855_979612"
+        ]
+    },
+    "evaluations": {
+        "UPPER_PROTOTYPE": {
+            "goal_reached": true,
+            "risk_seen": false,
+            "violation_seen": false,
+            "segment_violation_seen": false,
+            "min_obstacle_clearance": 0.4492,
+            "max_orientation_error_deg": 0.0,
+            "task_valid": true,
+            "strict_safe": true
+        },
+        "LOWER_PROTOTYPE": {
+            "goal_reached": true,
+            "risk_seen": false,
+            "violation_seen": false,
+            "segment_violation_seen": false,
+            "min_obstacle_clearance": 0.5472,
+            "max_orientation_error_deg": 0.0,
+            "task_valid": true,
+            "strict_safe": true
+        },
+        "NAIVE_SINGLE_MEAN": {
+            "goal_reached": true,
+            "risk_seen": true,
+            "violation_seen": true,
+            "segment_violation_seen": true,
+            "min_obstacle_clearance": 0.0,
+            "max_orientation_error_deg": 0.0,
+            "task_valid": false,
+            "strict_safe": false
+        }
+    },
+    "checks": {
+        "upper_prototype_task_valid": true,
+        "lower_prototype_task_valid": true,
+        "distinct_valid_strategies_preserved": true,
+        "naive_mixed_strategy_violation_observed": true,
+        "overall_sanity_pass": true
+    }
+}

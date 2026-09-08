@@ -1,0 +1,29 @@
+{
+    "analysis_type": "offline same-trace policy exposure comparison v2",
+    "metric_semantics": {
+        "adaptive_exposure_source": "presentation_mode",
+        "corrective_guidance": "EXPLICIT_* plus STRONG_* presentation modes",
+        "recovery_fade": "reported separately and excluded from corrective-guidance time"
+    },
+    "claim_boundary": "All policies are evaluated on traces recorded under the current AdaptiveSkill system. This comparison characterises policy exposure on the same observed trajectories; it does not estimate how a human would causally behave under a different policy.",
+    "trials_compared": 6,
+    "aggregate": {
+        "duration_sec": 43.9062,
+        "task_valid_time_sec": 31.4389,
+        "task_risk_time_sec": 9.4956,
+        "task_violation_time_sec": 2.9715,
+        "task_risk_or_violation_time_sec": 12.4671,
+        "reference_intervention_time_sec": 40.8466,
+        "reference_unnecessary_valid_time_sec": 28.3793,
+        "reference_missed_task_risk_time_sec": 0.0,
+        "binary_full_guidance_time_sec": 12.4671,
+        "adaptive_minimal_cue_time_sec": 3.2419,
+        "adaptive_explicit_guidance_time_sec": 8.6933,
+        "adaptive_strong_guidance_time_sec": 0.532,
+        "adaptive_corrective_guidance_time_sec": 9.2253,
+        "adaptive_recovery_fade_time_sec": 7.3431,
+        "adaptive_any_visible_assistance_time_sec": 19.8102,
+        "adaptive_no_guidance_time_sec": 24.0958
+    },
+    "overall_adaptive_corrective_guidance_reduction_vs_binary_ratio": 0.26
+}

@@ -1,3 +1,12 @@
 .venv/
 __pycache__/
-*.pyc
+*.pyc*_before_*.py
+data/hand_orientation_calibration/
+data/hand_orientation_deliberate_tilt/
+data/hand_orientation_movement/
+data/hand_orientation_route/
+data/runtime_trials/
+data/policy_comparison/three_policy_comparison.csv
+data/policy_comparison/three_policy_comparison_summary.json
+**/*_before_*.py
+rollout/virtual_replay.py
