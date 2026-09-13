@@ -4,9 +4,9 @@
 
 > **Different from an expert demonstration does not necessarily mean wrong.**
 
-AdaptiveSkill is an exploratory Human–Robot Interaction / Learning from Demonstration (LfD) prototype that separates **expert-reference similarity** from **task validity**. Instead of correcting every trajectory that differs from an expert prior, the system first asks whether the behaviour is still safe and task-valid, then provides the **minimum actionable assistance** needed.
+AdaptiveSkill is an exploratory Human–Robot Interaction / Learning from Demonstration (LfD) prototype that separates **expert-reference similarity** from **task validity**. Instead of correcting every trajectory that differs from an expert prior, the system evaluates whether the behaviour remains task-valid and then selects the lowest configured assistance level consistent with the current task state.
 
-**Current status:** exploratory research prototype · 2D embodied interaction · hand + mouse input · engineering validation
+**Current status:** exploratory research prototype · 2D interaction · hand + mouse input · engineering validation only
 
 
 <p align="center">
@@ -45,17 +45,9 @@ AdaptiveSkill therefore does **not** use reference deviation as the sole definit
 
 ## Why this project
 
-Prior work in human-centred robot learning has already shown the value of:
+Relevant research in human-centred robot learning and interactive Learning from Demonstration has explored demonstration quality, mixed-reality and AR feedback, interface interventions, assisted control, and real-time guidance for robot teaching.
 
-- evaluating demonstration quality beyond task success,
-- mixed-reality and AR feedback for robot teaching,
-- UI interventions during Learning from Demonstration,
-- assisted control and visual guidance,
-- and real-time feedback for novice robot teachers.
-
-AdaptiveSkill is **not** intended to re-claim those ideas as novel.
-
-Instead, it focuses on a narrower follow-up problem:
+AdaptiveSkill focuses on a narrower interaction-policy problem:
 
 > **When is intervention actually warranted?**
 
@@ -65,7 +57,7 @@ The prototype operationalises three distinctions:
 2. **Task risk ≠ hard constraint violation**
 3. **Persistent valid difference ≠ inferred user intention**
 
-When the system cannot know why a task-valid user is following a different strategy, it asks the user rather than pretending to infer intent.
+When a persistent task-valid deviation is ambiguous, the system asks the user rather than inferring intent from trajectory deviation alone.
 
 ---
 
@@ -286,7 +278,7 @@ It does **not** demonstrate reduced cognitive workload, improved learning, trust
 
 ### 3. Downstream strategy-preservation test
 
-Six human mouse demonstrations were collected:
+Six mouse-controlled demonstration traces were recorded:
 
 - **3 UPPER** safe routes
 - **3 LOWER** safe routes
@@ -345,7 +337,7 @@ The aim is not only to make the interface less intrusive, but to avoid premature
 
 Early technical probes examined a 2D wrist-to-middle-MCP orientation proxy.
 
-The position signal was sufficiently usable for the embodied demo, but natural obstacle-avoidance motion overlapped substantially with subjectively mild deliberate hand tilt.
+The position signal was sufficiently usable for the hand-controlled demo, but natural obstacle-avoidance motion overlapped substantially with the 2D proxy values produced by mild deliberate hand tilt during exploratory testing.
 
 For this reason, the current hand-controlled demo uses:
 
@@ -440,7 +432,6 @@ AdaptiveSkill focuses on a complementary interaction-policy question:
 
 The current prototype approaches this question by separating **expert-reference similarity** from **task validity**, preserving task-valid alternatives, asking the user when a persistent valid difference is ambiguous, and escalating assistance only when task-relevant risk or hard constraints warrant it.
 
-This README intentionally presents the project at a field level rather than tailoring its framing to any particular supervisor, laboratory, or institution.
 
 ---
 
@@ -555,7 +546,7 @@ Logged information includes:
 - assistance level,
 - presentation mode,
 - recovery behaviour,
-- user intent-confirmation events,
+- user clarification events,
 - task outcome,
 - and trial-level intervention metrics.
 
@@ -577,4 +568,4 @@ The next question is not simply how to add more feedback.
 
 It is:
 
-> **Can an assistive robot-teaching system learn when intervention is actually useful, preserve meaningful diversity in human teaching strategies, and still guarantee task-relevant safety in a real 3D robot setting?**
+> **Can an assistive robot-teaching system learn when intervention is actually useful, preserve meaningful diversity in human teaching strategies, and still maintain task-relevant safety constraints in a real 3D robot setting?**
