@@ -1,0 +1,30 @@
+{
+    "baseline": {
+        "correct_trials": 5,
+        "valid_frames": 620,
+        "path_median": 0.082577,
+        "path_p90": 0.266769,
+        "path_p99": 0.488328,
+        "angle_median_deg": 2.4783,
+        "angle_p90_deg": 5.0426,
+        "angle_p99_deg": 6.4307
+    },
+    "thresholds": {
+        "path_mild": 0.266769,
+        "path_strong": 0.488328,
+        "angle_mild_deg": 5.0426,
+        "angle_strong_deg": 6.4307
+    },
+    "progress": {
+        "ignore_start": 0.08,
+        "ignore_end": 0.95
+    },
+    "timing": {
+        "level_1_hold_sec": 0.35,
+        "level_2_hold_sec": 0.65,
+        "level_3_hold_sec": 3.0,
+        "recovery_sec": 0.6,
+        "hesitation_window_sec": 8.0,
+        "hesitation_events_for_level_3": 2
+    }
+}

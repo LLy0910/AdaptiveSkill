@@ -1,0 +1,18 @@
+{
+    "speed_threshold": 0.81684,
+    "hold_duration_sec": 0.525,
+    "max_progress_delta": 0.02,
+    "ignore_start_progress": 0.08,
+    "ignore_end_progress": 0.95,
+    "cooldown_sec": 0.8,
+    "baseline": {
+        "correct_trials": 5,
+        "speed_mean": 1.52438,
+        "speed_median": 1.434647,
+        "speed_p05": 0.656793,
+        "speed_p10": 0.81684,
+        "speed_p15": 0.988191,
+        "speed_p20": 1.055618,
+        "max_natural_stall_sec": 0.275
+    }
+}

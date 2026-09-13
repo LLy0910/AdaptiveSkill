@@ -1,0 +1,99 @@
+{
+    "prototype_note": "These scenarios are predefined engineering validation cases for the AdaptiveSkill prototype. They are not a user study and do not establish behavioral or learning effectiveness.",
+    "scenarios": [
+        {
+            "key": "1",
+            "id": "SAFE_ALTERNATIVE",
+            "title": "Safe Alternative Route",
+            "instruction": "Use a clearly different route from the expert prior while remaining outside the obstacle safety margin and reaching the target.",
+            "validation_target": "A valid alternative strategy should be preserved without task-aware assistance.",
+            "expected": {
+                "max_assistance_min": 0,
+                "max_assistance_max": 0,
+                "risk_observed": false,
+                "violation_observed": false,
+                "goal_reached": true,
+                "reference_intervened": true,
+                "task_aware_intervened": false,
+                "recovery_needed": false
+            }
+        },
+        {
+            "key": "2",
+            "id": "BRIEF_RISK",
+            "title": "Brief Obstacle Risk",
+            "instruction": "Briefly enter the obstacle safety margin, then return to a valid region before the risk persists for approximately 0.8 seconds.",
+            "validation_target": "A brief task risk should trigger minimal assistance only, followed by withdrawal after recovery.",
+            "expected": {
+                "max_assistance_min": 1,
+                "max_assistance_max": 1,
+                "risk_observed": true,
+                "violation_observed": false,
+                "goal_reached": true,
+                "task_aware_intervened": true,
+                "returned_to_quiet": true
+            }
+        },
+        {
+            "key": "3",
+            "id": "PERSISTENT_RISK",
+            "title": "Persistent Obstacle Risk",
+            "instruction": "Remain inside the obstacle safety margin for longer than approximately 0.8 seconds without entering the obstacle, then recover and reach the target.",
+            "validation_target": "Persistent risk should escalate from minimal assistance to explicit task-safe correction.",
+            "expected": {
+                "max_assistance_min": 2,
+                "max_assistance_max": 2,
+                "risk_observed": true,
+                "violation_observed": false,
+                "goal_reached": true,
+                "task_aware_intervened": true,
+                "returned_to_quiet": true
+            }
+        },
+        {
+            "key": "4",
+            "id": "ORIENTATION_RISK",
+            "title": "Persistent Orientation Risk",
+            "instruction": "Create an orientation error that first enters the mild-risk range and persists long enough to trigger explicit orientation guidance, then restore the object upright and reach the target.",
+            "validation_target": "Orientation assistance should progress from a minimal directional cue to explicit ghost-pose and degree guidance.",
+            "expected": {
+                "max_assistance_min": 2,
+                "max_assistance_max": 2,
+                "risk_observed": true,
+                "goal_reached": true,
+                "task_aware_intervened": true,
+                "returned_to_quiet": true
+            }
+        },
+        {
+            "key": "5",
+            "id": "VIOLATION_RECOVERY",
+            "title": "Violation and Recovery",
+            "instruction": "Enter a task-constraint violation briefly, recover before strong-assistance escalation, then complete the task safely.",
+            "validation_target": "A real violation should trigger explicit correction, remain in trial history after recovery, and allow assistance to return to quiet.",
+            "expected": {
+                "max_assistance_min": 2,
+                "max_assistance_max": 2,
+                "violation_observed": true,
+                "goal_reached": true,
+                "task_aware_intervened": true,
+                "returned_to_quiet": true
+            }
+        },
+        {
+            "key": "6",
+            "id": "PERSISTENT_VIOLATION",
+            "title": "Persistent Violation",
+            "instruction": "Remain in a task-constraint violation for longer than approximately 2 seconds until strong assistance is triggered, then recover and reach the target.",
+            "validation_target": "Persistent violation should escalate to L3 strong assistance and later fade after recovery.",
+            "expected": {
+                "max_assistance_min": 3,
+                "max_assistance_max": 3,
+                "violation_observed": true,
+                "goal_reached": true,
+                "task_aware_intervened": true,
+                "returned_to_quiet": true
+            }
+        }
+    ]
+}
